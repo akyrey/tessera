@@ -1,0 +1,11 @@
+.git
+**/node_modules
+**/target
+frontend/dist
+frontend/coverage
+frontend/test-results
+frontend/playwright-report
+frontend/.e2e
+**/*.db
+**/*.db-*
+docs
