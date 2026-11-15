@@ -32,7 +32,7 @@ WORKDIR /src/backend
 COPY backend/ ./
 # rust-embed bakes the frontend into the release binary at compile time.
 COPY --from=frontend /src/frontend/dist /src/frontend/dist
-RUN --mount=type=cache,id=cargo-registry,target=/usr/local/cargo/registry \
+RUN --mount=type=cache,id=cargo-registry,target=/usr/local/cargo/registry,sharing=locked \
     --mount=type=cache,id=cargo-target-${TARGETARCH},target=/src/backend/target \
     case "${TARGETARCH}" in \
       amd64) TARGET=x86_64-unknown-linux-musl ;; \

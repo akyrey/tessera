@@ -16,14 +16,45 @@ export class ApiError extends Error {
   }
 }
 
+export function isApiError(error: unknown, status?: number): error is ApiError {
+  return error instanceof ApiError && (status === undefined || error.status === status)
+}
+
 const errorBodySchema = z.object({
   error: z.object({ code: z.string(), message: z.string() }),
 }) satisfies z.ZodType<ErrorBody>
 
+type Method = 'GET' | 'POST' | 'DELETE'
+
+interface RequestOptions {
+  readonly body?: unknown
+  readonly signal?: AbortSignal
+}
+
 /** GETs JSON from the same-origin API and validates it against `schema`. */
-export async function getJson<T>(path: string, schema: z.ZodType<T>, signal?: AbortSignal): Promise<T> {
-  const response = await send(path, signal)
-  const body: unknown = await response.json().catch(() => undefined)
+export function getJson<T>(path: string, schema: z.ZodType<T>, signal?: AbortSignal): Promise<T> {
+  return requestJson('GET', path, schema, { signal })
+}
+
+/** POSTs `body` as JSON and validates the JSON response against `schema`. */
+export function postJson<T>(path: string, schema: z.ZodType<T>, body?: unknown): Promise<T> {
+  return requestJson('POST', path, schema, { body })
+}
+
+/** Sends a request whose successful response has no body (e.g. 204). */
+export async function sendRequest(method: Method, path: string, body?: unknown): Promise<void> {
+  const response = await send(method, path, { body })
+  if (!response.ok) throw toApiError(response, await readJson(response))
+}
+
+async function requestJson<T>(
+  method: Method,
+  path: string,
+  schema: z.ZodType<T>,
+  options: RequestOptions,
+): Promise<T> {
+  const response = await send(method, path, options)
+  const body = await readJson(response)
 
   if (!response.ok) throw toApiError(response, body)
 
@@ -34,17 +65,25 @@ export async function getJson<T>(path: string, schema: z.ZodType<T>, signal?: Ab
   return parsed.data
 }
 
-async function send(path: string, signal?: AbortSignal): Promise<Response> {
+async function send(method: Method, path: string, { body, signal }: RequestOptions): Promise<Response> {
+  const headers: Record<string, string> = { Accept: 'application/json' }
+  if (body !== undefined) headers['Content-Type'] = 'application/json'
   try {
     return await fetch(path, {
+      method,
       credentials: 'same-origin',
-      headers: { Accept: 'application/json' },
+      headers,
+      body: body === undefined ? undefined : JSON.stringify(body),
       signal,
     })
   } catch (error) {
     if (error instanceof DOMException && error.name === 'AbortError') throw error
     throw new ApiError(0, 'network_error', 'Cannot reach the server')
   }
+}
+
+function readJson(response: Response): Promise<unknown> {
+  return response.json().catch(() => undefined)
 }
 
 function toApiError(response: Response, body: unknown): ApiError {

@@ -177,7 +177,7 @@ loyalty/
 
 Each milestone is test-first and ends with something usable on a phone.
 
-### M0 — Skeleton & deployment path
+### M0 — Skeleton & deployment path ✅
 - Repo, `Makefile`, rustfmt/clippy, oxlint/Prettier, Tailwind, Vitest, Playwright (Chromium + WebKit).
 - axum serves `/healthz`, `/readyz` and the embedded Vite build. Vite dev proxy for local development.
 - `ts-rs` type generation wired into the build.
@@ -185,10 +185,10 @@ Each milestone is test-first and ends with something usable on a phone.
 - `docs/DEPLOYMENT.md`: the contract the (externally owned) kustomize manifests must satisfy — port, probes, env vars, volume, single replica + `Recreate`, Litestream → R2, NetworkPolicy from `cloudflared`, Cloudflare WAF (`IT` only) and cache rules. Deployed with `kubectl apply -k`.
 - GitHub Actions: lint + tests on PRs; on `main`, build and push `ghcr.io/<owner>/tessera:<sha>` for amd64 + arm64. Private GHCR package → `imagePullSecret` in the cluster.
 - Security baseline: HSTS, CSP (with `wasm-unsafe-eval` for the scanner), Permissions-Policy, nosniff, frame denial, per-path cache headers.
-  *(Moved to M1, together with the first mutating endpoints: session cookies, Origin check, rate limiting keyed on `CF-Connecting-IP`.)*
+  *(Session cookies, Origin check and rate limiting landed in M1 with the first mutating endpoints.)*
 - **Done when:** the PWA installs from the public hostname on iPhone and Android and shows "hello" from the API; a pod restart on the other node architecture keeps the data.
 
-### M1 — Auth & household
+### M1 — Auth & household ✅
 - Migrations for users, passkeys, households, members, invites.
 - Bootstrap: on first start, print a one-time admin registration link to the log.
 - Passkey registration and login, sessions, logout.
@@ -196,6 +196,14 @@ Each milestone is test-first and ends with something usable on a phone.
 - Recovery: a `loyalty admin create-invite` CLI subcommand, run via `kubectl exec`, so a lost phone isn't a lockout.
 - Brute-force protection: strict rate limits on auth endpoints; invite tokens are 256-bit, hashed, single-use, expiring.
 - **Done when:** both of us can log in on our own phones.
+- *As built:* every user belongs to exactly one household (`UNIQUE(user_id)`); only the owner can invite.
+  WebAuthn ceremony state is kept in memory (single replica; restart = retry).
+  Sessions are opaque cookies (`__Host-tessera_session`, SHA-256 stored), not JWTs, so logout and expiry are immediate.
+  The Playwright suite runs real passkey ceremonies with Chromium's virtual authenticator.
+  Security review follow-ups (done): recovery and passkey removal revoke other sessions, "sign out of all devices",
+  IPv6 rate limiting per /64, at most 8 pending ceremonies per client, strong-entropy check for `TESSERA_BOOTSTRAP_TOKEN`,
+  invite token stripped from the address bar, household invites valid 48h.
+  Open: list/revoke pending household invites (low priority for two users).
 
 ### M2 — Cards core (online)
 - Card CRUD with manual entry and barcode format picker. Validate number vs. format (e.g. EAN check digit).

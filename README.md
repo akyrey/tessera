@@ -18,5 +18,8 @@ make check          # lint, tests, coverage, e2e (what CI runs)
 make image          # multi-arch container image
 ```
 
+First run: start the backend and open the first-admin link it logs (`/join#…`).
+Other admin tasks: `cargo run -- admin --help` (in the cluster: `kubectl exec … -- /tessera admin …`).
+
 Rust DTOs annotated with `#[ts(export)]` generate TypeScript into `frontend/src/api/generated/` when the backend tests run (`make gen-types`).
 Those files are committed, and CI fails if they drift.

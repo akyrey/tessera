@@ -1,6 +1,7 @@
 //! API error type rendered as `{ "error": { "code", "message" } }`.
 
 use axum::Json;
+use axum::extract::rejection::JsonRejection;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use serde::Serialize;
@@ -21,21 +22,63 @@ pub struct ErrorDetail {
 
 #[derive(Debug, thiserror::Error)]
 pub enum ApiError {
+    #[error("{0}")]
+    Validation(String),
+    #[error("sign in required")]
+    Unauthorized,
+    #[error("passkey sign-in failed")]
+    AuthenticationFailed,
+    #[error("this passkey request expired, please try again")]
+    CeremonyExpired,
+    #[error("this invite link is invalid, expired or already used")]
+    InvalidInvite,
+    #[error("you are not allowed to do this")]
+    Forbidden,
+    #[error("request origin not allowed")]
+    BadOrigin,
     #[error("resource not found")]
     NotFound,
+    #[error("{0}")]
+    Conflict(&'static str),
+    #[error("too many requests, slow down")]
+    RateLimited,
     #[error("service unavailable")]
     Unavailable,
     #[error(transparent)]
     Database(#[from] sqlx::Error),
+    /// Unexpected failure; the detail is logged, never returned.
+    #[error("{0}")]
+    Internal(String),
 }
 
 impl ApiError {
+    pub fn internal(context: &str, error: impl std::fmt::Display) -> Self {
+        Self::Internal(format!("{context}: {error}"))
+    }
+
     fn status_and_code(&self) -> (StatusCode, &'static str) {
         match self {
+            Self::Validation(_) => (StatusCode::BAD_REQUEST, "invalid_request"),
+            Self::Unauthorized => (StatusCode::UNAUTHORIZED, "unauthorized"),
+            Self::AuthenticationFailed => (StatusCode::UNAUTHORIZED, "authentication_failed"),
+            Self::CeremonyExpired => (StatusCode::BAD_REQUEST, "ceremony_expired"),
+            Self::InvalidInvite => (StatusCode::GONE, "invalid_invite"),
+            Self::Forbidden => (StatusCode::FORBIDDEN, "forbidden"),
+            Self::BadOrigin => (StatusCode::FORBIDDEN, "bad_origin"),
             Self::NotFound => (StatusCode::NOT_FOUND, "not_found"),
+            Self::Conflict(_) => (StatusCode::CONFLICT, "conflict"),
+            Self::RateLimited => (StatusCode::TOO_MANY_REQUESTS, "rate_limited"),
             Self::Unavailable => (StatusCode::SERVICE_UNAVAILABLE, "unavailable"),
-            Self::Database(_) => (StatusCode::INTERNAL_SERVER_ERROR, "internal"),
+            Self::Database(_) | Self::Internal(_) => {
+                (StatusCode::INTERNAL_SERVER_ERROR, "internal")
+            }
         }
+    }
+}
+
+impl From<JsonRejection> for ApiError {
+    fn from(rejection: JsonRejection) -> Self {
+        Self::Validation(rejection.body_text())
     }
 }
 
@@ -58,3 +101,8 @@ impl IntoResponse for ApiError {
         (status, Json(body)).into_response()
     }
 }
+
+/// `Json<T>` whose rejections use the API error envelope instead of plain text.
+#[derive(axum::extract::FromRequest)]
+#[from_request(via(axum::Json), rejection(ApiError))]
+pub struct ApiJson<T>(pub T);

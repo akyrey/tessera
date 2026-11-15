@@ -2,9 +2,9 @@
 
 use axum::extract::State;
 
-use super::AppState;
 use crate::db;
 use crate::error::ApiError;
+use crate::state::AppState;
 
 pub async fn live() -> &'static str {
     "ok"

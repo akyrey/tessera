@@ -42,8 +42,29 @@ container expects, so the manifests can be written and checked against it.
 | `TESSERA_REGION_ISO3166` | no | `IT` | |
 | `TESSERA_NEARBY_RADIUS_M` | no | `200` | 1–5000 |
 | `TESSERA_STORE_REFRESH_INTERVAL` | no | `7d` | humantime syntax (`12h`, `7d`) |
-| `TESSERA_SESSION_TTL` | no | `30d` | |
+| `TESSERA_SESSION_TTL` | no | `30d` | How long a sign-in lasts |
+| `TESSERA_BOOTSTRAP_TOKEN` | no | random | Secret. Fixed first-admin token: 32 random bytes, base64url (`openssl rand -base64 32 \| tr '+/' '-_' \| tr -d '='`); weak values are rejected. Unset: a random link is logged at startup while no users exist |
 | `RUST_LOG` | no | `info` | |
+
+## First start and account recovery
+
+While the database has no users, every start creates a single-use **first-admin link**, valid 24h:
+
+- Without `TESSERA_BOOTSTRAP_TOKEN`, the link is printed in the logs (`no users yet: open this link…`).
+  It stops working as soon as the first account exists.
+- With `TESSERA_BOOTSTRAP_TOKEN` (from a Secret), nothing secret is logged: open `https://<host>/join#<token>`.
+
+Admin commands run inside the pod and print links to stdout:
+
+```sh
+kubectl exec deploy/tessera -c tessera -- /tessera admin users              # ids, households, passkey counts
+kubectl exec deploy/tessera -c tessera -- /tessera admin invite             # household invite (48h, single use)
+kubectl exec deploy/tessera -c tessera -- /tessera admin recover <user-id>  # new passkey after losing all devices (24h)
+```
+
+Invite secrets live in the URL fragment (`#…`), which browsers never send to the server, so they don't appear in Cloudflare or app logs.
+
+Signing out of compromised devices: completing a recovery link ends all of that user's sessions; removing a passkey ends every session except the current one; Settings → "Sign out of all devices" ends all of them.
 
 ## Backups: Litestream sidecar → Cloudflare R2
 
@@ -69,7 +90,8 @@ Then a lost PVC recovers on the next pod start.
 ## Network & Cloudflare
 
 - No Ingress or NodePort. Add a public-hostname route on the existing tunnel → `http://<service>.<namespace>.svc.cluster.local:8080`.
-- NetworkPolicy: allow ingress to port 8080 only from the `cloudflared` pods. The app will trust `CF-Connecting-IP` for rate limiting (from M1).
+- NetworkPolicy: allow ingress to port 8080 only from the `cloudflared` pods. The app trusts `CF-Connecting-IP` as the client IP for rate limiting
+  (20 auth requests/min and 600 API requests/min per IPv4 address or IPv6 /64), which is only safe while nothing else can reach the pod.
   Also allow egress to DNS, R2 (Litestream) and, from M5, `overpass-api.de` / `query.wikidata.org`.
 - WAF custom rule: block when `ip.geoip.country ne "IT"`.
 - Caching: the app sends `Cache-Control` on every response: `immutable` for `/assets/*`, `no-cache` for `index.html`/`sw.js`/manifest/icons, `no-store` for everything else (API, probes, errors).

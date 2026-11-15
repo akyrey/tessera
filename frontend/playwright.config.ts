@@ -1,4 +1,5 @@
 import { defineConfig, devices } from '@playwright/test'
+import { E2E_BOOTSTRAP_TOKEN } from './e2e/constants.ts'
 
 const PORT = 8181
 const BASE_URL = `http://localhost:${PORT}`
@@ -27,6 +28,7 @@ export default defineConfig({
       TESSERA_PUBLIC_URL: BASE_URL,
       TESSERA_LISTEN_ADDR: `127.0.0.1:${PORT}`,
       TESSERA_DATABASE_URL: 'sqlite://.e2e/e2e.db',
+      TESSERA_BOOTSTRAP_TOKEN: E2E_BOOTSTRAP_TOKEN,
     },
   },
 })

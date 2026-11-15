@@ -46,6 +46,8 @@ export default defineConfig({
     setupFiles: ['./src/test/setup.ts'],
     include: ['src/**/*.test.{ts,tsx}'],
     restoreMocks: true,
+    mockReset: true,
+    unstubGlobals: true,
     coverage: {
       provider: 'v8',
       include: ['src/**/*.{ts,tsx}'],
@@ -53,7 +55,9 @@ export default defineConfig({
         'src/**/*.test.{ts,tsx}',
         'src/test/**',
         'src/api/generated/**',
+        // Composition roots: covered by the Playwright suite.
         'src/main.tsx',
+        'src/App.tsx',
         'src/pwa.ts',
       ],
       thresholds: {

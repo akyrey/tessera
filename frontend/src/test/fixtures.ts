@@ -1,0 +1,29 @@
+import type { Me } from '../api/generated/Me'
+import type { PasskeyDto } from '../api/generated/PasskeyDto'
+
+export const owner: Me = {
+  user: { id: 'u-alice', displayName: 'Alice', isAdmin: true },
+  household: {
+    id: 'h-1',
+    name: 'Home',
+    role: 'owner',
+    members: [
+      { userId: 'u-alice', displayName: 'Alice', role: 'owner', joinedAt: 1_800_000_000 },
+      { userId: 'u-bea', displayName: 'Bea', role: 'member', joinedAt: 1_800_000_100 },
+    ],
+  },
+}
+
+export const member: Me = {
+  user: { id: 'u-bea', displayName: 'Bea', isAdmin: false },
+  household: { ...owner.household, role: 'member' },
+}
+
+export const passkey = (id: string, name: string): PasskeyDto => ({
+  id,
+  name,
+  createdAt: 1_800_000_000,
+  lastUsedAt: null,
+})
+
+export const ceremony = { ceremonyId: 'c-1', options: { publicKey: { challenge: 'abc' } } }

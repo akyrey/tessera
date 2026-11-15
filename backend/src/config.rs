@@ -8,6 +8,8 @@ use std::time::Duration;
 
 use url::Url;
 
+use crate::tokens;
+
 const PREFIX: &str = "TESSERA_";
 
 const DEFAULT_RP_NAME: &str = "Tessera";
@@ -33,6 +35,24 @@ pub struct Config {
     pub nearby_radius_m: u32,
     pub store_refresh_interval: Duration,
     pub session_ttl: Duration,
+    /// Fixed token for the first-admin invite link; random when unset.
+    pub bootstrap_token: Option<Secret>,
+}
+
+/// A configuration value that must never appear in logs or `Debug` output.
+#[derive(Clone, PartialEq, Eq)]
+pub struct Secret(String);
+
+impl Secret {
+    pub fn expose(&self) -> &str {
+        &self.0
+    }
+}
+
+impl std::fmt::Debug for Secret {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Secret([redacted])")
+    }
 }
 
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
@@ -86,6 +106,7 @@ impl Config {
                 DEFAULT_STORE_REFRESH_INTERVAL,
             )?,
             session_ttl: parse_duration("SESSION_TTL", get("SESSION_TTL"), DEFAULT_SESSION_TTL)?,
+            bootstrap_token: parse_bootstrap_token(get("BOOTSTRAP_TOKEN"))?,
         })
     }
 
@@ -169,6 +190,23 @@ fn parse_radius(raw: Option<String>) -> Result<u32, ConfigError> {
         _ => Err(ConfigError::invalid(
             NAME,
             format!("must be an integer between 1 and {MAX_NEARBY_RADIUS_M}"),
+        )),
+    }
+}
+
+fn parse_bootstrap_token(raw: Option<String>) -> Result<Option<Secret>, ConfigError> {
+    match raw {
+        None => Ok(None),
+        Some(token) if tokens::looks_valid(&token) && tokens::is_strong(&token) => {
+            Ok(Some(Secret(token)))
+        }
+        Some(_) => Err(ConfigError::invalid(
+            "BOOTSTRAP_TOKEN",
+            format!(
+                "must be {} base64url characters of random data (32 bytes), e.g. \
+                 `openssl rand -base64 32 | tr '+/' '-_' | tr -d '='`",
+                tokens::ENCODED_LEN
+            ),
         )),
     }
 }
@@ -354,6 +392,22 @@ mod tests {
                 ..
             }
         ));
+    }
+
+    #[test]
+    fn bootstrap_token_is_optional_validated_and_redacted() {
+        assert_eq!(load_with_url(&[]).unwrap().bootstrap_token, None);
+        assert!(load_with_url(&[("BOOTSTRAP_TOKEN", "too-short")]).is_err());
+
+        assert!(load_with_url(&[("BOOTSTRAP_TOKEN", &"x".repeat(tokens::ENCODED_LEN))]).is_err());
+
+        let token = tokens::SecretToken::generate().value;
+        let config = load_with_url(&[("BOOTSTRAP_TOKEN", &token)]).unwrap();
+        assert_eq!(
+            config.bootstrap_token.as_ref().map(Secret::expose),
+            Some(token.as_str())
+        );
+        assert!(!format!("{config:?}").contains(&token));
     }
 
     #[test]

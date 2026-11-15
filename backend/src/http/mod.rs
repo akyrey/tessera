@@ -2,32 +2,41 @@
 
 mod health;
 mod meta;
+pub mod origin;
+pub mod rate_limit;
 mod security;
 mod static_files;
 
-use std::sync::Arc;
-
+use axum::extract::DefaultBodyLimit;
 use axum::routing::get;
 use axum::{Router, middleware};
-use sqlx::SqlitePool;
 use tower_http::compression::CompressionLayer;
 use tower_http::trace::TraceLayer;
 
-use crate::config::Config;
+use crate::accounts;
 use crate::error::ApiError;
+use crate::state::AppState;
 
 pub use meta::AppInfo;
 
-#[derive(Clone)]
-pub struct AppState {
-    pub db: SqlitePool,
-    pub config: Arc<Config>,
-}
+/// JSON bodies are small (WebAuthn credentials are a few KiB).
+const API_BODY_LIMIT: usize = 64 * 1024;
 
 pub fn router(state: AppState) -> Router {
+    // Layers run outermost-last: rate limit → Origin check → body limit → handler.
     let api = Router::new()
         .route("/version", get(meta::version))
-        .fallback(api_not_found);
+        .merge(accounts::routes(&state))
+        .fallback(api_not_found)
+        .layer(DefaultBodyLimit::max(API_BODY_LIMIT))
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            origin::require_same_origin,
+        ))
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            rate_limit::limit_api,
+        ));
 
     Router::new()
         .route("/healthz", get(health::live))

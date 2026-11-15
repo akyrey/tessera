@@ -1,16 +1,21 @@
+use std::net::SocketAddr;
 use std::process::ExitCode;
-use std::sync::Arc;
 
+use clap::Parser;
+use tessera::accounts::service;
+use tessera::cli::{Cli, Command, run_admin};
+use tessera::clock::now_unix;
 use tessera::config::Config;
-use tessera::{AppState, db, router};
+use tessera::{AppState, db, janitor, router};
 use tokio::net::TcpListener;
 use tokio::signal;
 use tracing_subscriber::EnvFilter;
 
 #[tokio::main]
 async fn main() -> ExitCode {
+    let cli = Cli::parse();
     init_tracing();
-    match run().await {
+    match run(cli.command.unwrap_or(Command::Serve)).await {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
             tracing::error!(%error, "tessera stopped");
@@ -19,11 +24,41 @@ async fn main() -> ExitCode {
     }
 }
 
-async fn run() -> Result<(), Box<dyn std::error::Error>> {
+async fn run(command: Command) -> Result<(), Box<dyn std::error::Error>> {
     let config = Config::from_env()?;
-    let db = db::connect(&config.database_url).await?;
-    let listener = TcpListener::bind(config.listen_addr).await?;
+    let pool = db::connect(&config.database_url).await?;
+    match command {
+        Command::Serve => serve(config, pool).await,
+        Command::Admin(action) => {
+            let result = run_admin(action, &config, &pool, &mut std::io::stdout()).await;
+            pool.close().await;
+            Ok(result?)
+        }
+    }
+}
 
+async fn serve(config: Config, pool: sqlx::SqlitePool) -> Result<(), Box<dyn std::error::Error>> {
+    let bootstrap = config
+        .bootstrap_token
+        .as_ref()
+        .map(|t| t.expose().to_owned());
+    if let Some(invite) =
+        service::ensure_bootstrap_invite(&pool, bootstrap.as_deref(), now_unix()).await?
+    {
+        if bootstrap.is_some() {
+            tracing::warn!(
+                "no users yet: open /join#<TESSERA_BOOTSTRAP_TOKEN> to create the first admin"
+            );
+        } else {
+            // Single use, valid 24h, and only while no account exists.
+            tracing::warn!(
+                link = %format!("{}/join#{}", config.public_origin(), invite.token.value),
+                "no users yet: open this link to create the first admin"
+            );
+        }
+    }
+
+    let listener = TcpListener::bind(config.listen_addr).await?;
     tracing::info!(
         addr = %config.listen_addr,
         public_url = %config.public_url,
@@ -31,15 +66,17 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         "tessera listening"
     );
 
-    let state = AppState {
-        db: db.clone(),
-        config: Arc::new(config),
-    };
-    axum::serve(listener, router(state))
-        .with_graceful_shutdown(shutdown_signal())
-        .await?;
+    let state = AppState::new(config, pool.clone())?;
+    let cleanup = janitor::spawn(state.clone());
+    axum::serve(
+        listener,
+        router(state).into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .with_graceful_shutdown(shutdown_signal())
+    .await?;
 
-    db.close().await;
+    cleanup.abort();
+    pool.close().await;
     Ok(())
 }
 
