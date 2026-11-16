@@ -306,12 +306,29 @@ Each milestone is test-first and ends with something usable on a phone.
   be brands (an unrelated item just finds no shops); `/api/locations` can reach a few MB for many large chains.
 
 
-### M6 — Polish / later
+### M6 — Polish / later ✅ (partly)
 - JSON export/import + encrypted backup; import from Stocard/CSV if exports allow it.
 - Coupons/vouchers with expiry reminders.
 - Map view (Leaflet + OSM tiles).
 - Apple/Google Wallet pass export (experiment).
 - Ops: documented Litestream restore drill, CI pipeline building and pushing the multi-arch image.
+- *As built:*
+  - **Expiry:** cards take an optional last valid day (`expires_on`, `YYYY-MM-DD`). The list shows an "Expiring soon"
+    group (within 7 days, closest first) and marks expired cards; the card view shows "Expires in N days". The reminder
+    is in-app only: Web Push needs a push service and VAPID keys, and iOS only delivers it to installed PWAs.
+  - **Export/import:** Settings → "Export cards" downloads a versioned JSON file (`tessera-backup` v1) with every card
+    the user owns, including photos as `data:` URLs. Import validates the file with zod (≤ 50 MB, ≤ 500 cards, photo
+    types checked) and adds the cards through the outbox, so it works offline. Brands are not restored; the brand name is
+    kept for reference and is linked again from the card form.
+  - **Map:** `/map` (linked from the list) shows the shops of the user's cards with Leaflet and OSM tiles. The CSP
+    allows `https://tile.openstreetmap.org`. Tiles need a connection; the shop list itself works offline.
+  - **Ops:** a restore drill is in `DEPLOYMENT.md`. The CI pipeline that builds and pushes the multi-arch image already
+    existed since M0 (`.github/workflows/ci.yml`).
+  - **Not done:**
+    - The export is not encrypted. Litestream covers the server, and a passphrase-encrypted export can be added later.
+    - Stocard has no export, so there is nothing to import from it. A CSV import was not built.
+    - Apple/Google Wallet passes are not built: they need an Apple Developer account with a Pass Type ID certificate,
+      and a Google Wallet issuer account.
 
 ## 8. Testing strategy
 

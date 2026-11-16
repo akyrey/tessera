@@ -90,6 +90,34 @@ Credentials come from a Secret as `LITESTREAM_ACCESS_KEY_ID` / `LITESTREAM_SECRE
 For restores, add an init container: `litestream restore -if-db-not-exists -if-replica-exists /data/tessera.db`.
 Then a lost PVC recovers on the next pod start.
 
+### Restore drill (every few months, and after changing the Litestream config)
+
+A backup is only good if it restores. From any machine with the `litestream` and `sqlite3` binaries and the R2 credentials exported:
+
+```sh
+# 1. Restore the latest replica to a scratch file (never over the live database).
+litestream restore -o /tmp/tessera-check.db \
+  's3://<bucket>/tessera?endpoint=https://<account-id>.r2.cloudflarestorage.com&region=auto&forcePathStyle=true'
+
+# 2. The file must be a healthy SQLite database.
+sqlite3 /tmp/tessera-check.db 'PRAGMA integrity_check;'   # → ok
+
+# 3. Compare with the live app (the app and Litestream images have no sqlite3).
+sqlite3 /tmp/tessera-check.db \
+  "SELECT u.display_name, count(*) FROM cards c JOIN users u ON u.id = c.owner_id
+   WHERE c.deleted_at IS NULL GROUP BY u.display_name;"
+
+# 4. Clean up: the file holds every card number and photo.
+rm /tmp/tessera-check.db*
+```
+
+Each user's count should match the number of their own cards in the app (the replica lags by at most a few seconds). If step 1 fails, check the Litestream sidecar logs
+(`kubectl logs deploy/tessera -c litestream`) before anything else: a sidecar that stopped replicating does not stop the app.
+For a full rehearsal, scale the deployment to 0, delete the PVC in a test namespace, and let the init container restore it.
+
+Users can also keep their own copy: Settings → "Export cards" downloads a JSON file with every card they own (photos included).
+That file is **not encrypted**; it is meant for moving cards, not as the server backup.
+
 ## Network & Cloudflare
 
 - No Ingress or NodePort. Add a public-hostname route on the existing tunnel → `http://<service>.<namespace>.svc.cluster.local:8080`.
