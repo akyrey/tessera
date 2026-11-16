@@ -29,6 +29,9 @@ const card = (id: string, storeName: string, barcodeFormat: string, cardNumber: 
   lastUsedAt: null,
   frontImageId: null,
   backImageId: null,
+  brandId: null as string | null,
+  brandName: null as string | null,
+  places: [] as { label: string; lat: number; lon: number }[],
   createdAt: 1_800_000_000,
   updatedAt: 1_800_000_000,
 })
@@ -48,6 +51,9 @@ async function stubApi(page: Page, uploads: string[] = []) {
   let cursor = 1
   await page.route('**/api/changes*', (route) => json(route, { cursor, cards: stored }))
   await page.route('**/api/cards/*/use', (route) => route.fulfill({ status: 204 }))
+  await page.route('**/api/locations*', (route) =>
+    json(route, { version: 'v1', radiusM: 200, brands: [{ brandId: 'b-esse', points: [[45.465, 9.19]] }] }),
+  )
   await page.route('**/api/cards/*/images/*', (route) => {
     uploads.push(route.request().headers()['content-type'] ?? '')
     return json(route, { id: 'img-1' })
@@ -138,4 +144,24 @@ test('fills the form by scanning a photo of a barcode', async ({ page }) => {
 
   await expect(page.getByLabel('Card number')).toHaveValue('4006381333931')
   await expect(page.getByLabel('Barcode type')).toHaveValue('ean13')
+})
+
+test.describe('nearby', () => {
+  test.use({ geolocation: { latitude: 45.4642, longitude: 9.19 }, permissions: ['geolocation'] })
+
+  test('puts the card of a nearby shop on top', async ({ page }) => {
+    await stubApi(page)
+    await page.route('**/api/changes*', (route) =>
+      json(route, {
+        cursor: 1,
+        cards: [{ ...card('c-ean', 'Esselunga', 'ean13', '4006381333931'), brandId: 'b-esse' }, CARDS[1]],
+      }),
+    )
+
+    await page.goto('/')
+
+    const nearby = page.getByRole('region', { name: 'Nearby' })
+    await expect(nearby.getByRole('link', { name: /Esselunga/ })).toBeVisible()
+    await expect(nearby.getByRole('link', { name: /Coop/ })).toHaveCount(0)
+  })
 })

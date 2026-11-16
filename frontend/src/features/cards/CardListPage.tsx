@@ -3,6 +3,7 @@ import { Link } from 'react-router'
 import type { CardDto } from '../../api/generated/CardDto'
 import { Screen } from '../../components/Screen'
 import { SyncBanner } from '../../offline/SyncBanner'
+import { NearbySection } from '../nearby/NearbySection'
 import { useMe } from '../auth/useMe'
 import { CardTile } from './CardTile'
 import { byStoreName, matchesQuery, organizeCards } from './organizeCards'
@@ -47,7 +48,14 @@ export function CardListPage() {
             onChange={(event) => setQuery(event.target.value)}
             className="min-h-11 rounded-xl bg-white px-4 ring-1 ring-brand-900/15 focus:ring-2 focus:ring-brand-700 focus:outline-none"
           />
-          {query.trim() ? <SearchResults cards={cards} query={query} /> : <Wallet cards={cards} />}
+          {query.trim() ? (
+            <SearchResults cards={cards} query={query} />
+          ) : (
+            <>
+              <NearbySection cards={cards} userId={me?.user.id} />
+              <Wallet cards={cards} />
+            </>
+          )}
         </>
       )}
 

@@ -12,7 +12,12 @@ export interface LocalCard extends CardDto {
 
 /** A change made on this device, waiting to be sent to the server. */
 export type CardOp =
-  | { readonly type: 'save'; readonly input: CardInput }
+  | {
+      readonly type: 'save'
+      readonly input: CardInput
+      /** Display name of `input.brandId`, shown until the server confirms it. */
+      readonly brandName?: string | null
+    }
   | { readonly type: 'delete' }
   | { readonly type: 'favorite'; readonly isFavorite: boolean }
   | { readonly type: 'share'; readonly shared: boolean }
@@ -38,6 +43,12 @@ export interface OutboxEntry {
   readonly attempts: number
 }
 
+/** Shops of one brand, as `[lat, lon]` pairs (from OpenStreetMap, via the server). */
+export interface BrandLocations {
+  readonly brandId: string
+  readonly points: readonly (readonly [number, number])[]
+}
+
 export interface MetaEntries {
   /** Last `cursor` from `/api/changes`; absent until the first successful pull. */
   readonly cursor: number
@@ -45,6 +56,10 @@ export interface MetaEntries {
   readonly me: Me
   /** Changes the server refused, shown to the user once. */
   readonly problems: readonly string[]
+  /** Version of the stored shop locations, from `/api/locations`. */
+  readonly locationsVersion: string
+  /** "Nearby" distance configured on the server, in metres. */
+  readonly radiusM: number
 }
 
 type MetaRow = {
@@ -55,6 +70,7 @@ export class TesseraDb extends Dexie {
   cards!: EntityTable<LocalCard, 'id'>
   outbox!: EntityTable<OutboxEntry, 'seq'>
   meta!: EntityTable<MetaRow, 'key'>
+  locations!: EntityTable<BrandLocations, 'brandId'>
 
   constructor() {
     super('tessera')
@@ -63,6 +79,7 @@ export class TesseraDb extends Dexie {
       outbox: '++seq, cardId',
       meta: 'key',
     })
+    this.version(2).stores({ locations: 'brandId' })
   }
 }
 
@@ -87,8 +104,8 @@ export function dataGeneration(): number {
 /** Removes every trace of the signed-in user from this device. */
 export async function clearLocalData(): Promise<void> {
   generation += 1
-  await db.transaction('rw', db.cards, db.outbox, db.meta, async () => {
-    await Promise.all([db.cards.clear(), db.outbox.clear(), db.meta.clear()])
+  await db.transaction('rw', [db.cards, db.outbox, db.meta, db.locations], async () => {
+    await Promise.all([db.cards.clear(), db.outbox.clear(), db.meta.clear(), db.locations.clear()])
   })
   if ('caches' in globalThis) await caches.delete(PHOTO_CACHE).catch(() => false)
   // Workbox's expiration bookkeeping lists the cached photo URLs.

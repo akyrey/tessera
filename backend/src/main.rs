@@ -6,7 +6,7 @@ use tessera::accounts::service;
 use tessera::cli::{Cli, Command, run_admin};
 use tessera::clock::now_unix;
 use tessera::config::Config;
-use tessera::{AppState, db, janitor, router};
+use tessera::{AppState, brands, db, janitor, router};
 use tokio::net::TcpListener;
 use tokio::signal;
 use tracing_subscriber::EnvFilter;
@@ -68,6 +68,7 @@ async fn serve(config: Config, pool: sqlx::SqlitePool) -> Result<(), Box<dyn std
 
     let state = AppState::new(config, pool.clone())?;
     let cleanup = janitor::spawn(state.clone());
+    let store_refresh = brands::refresh::spawn(state.clone());
     axum::serve(
         listener,
         router(state).into_make_service_with_connect_info::<SocketAddr>(),
@@ -76,6 +77,7 @@ async fn serve(config: Config, pool: sqlx::SqlitePool) -> Result<(), Box<dyn std
     .await?;
 
     cleanup.abort();
+    store_refresh.abort();
     pool.close().await;
     Ok(())
 }

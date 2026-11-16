@@ -3,22 +3,28 @@
 //! Cards a viewer may not see are reported as "not found", so ids of other
 //! users' cards cannot be probed.
 
+use std::collections::HashMap;
+
 use sqlx::{SqliteConnection, SqlitePool};
 use uuid::Uuid;
 
 use super::barcode::BarcodeFormat;
 use super::images::ImageMime;
 use super::model::{
-    CardAccess, CardDto, CardFields, CardInput, ChangesDto, ImageKind, StoredImage,
+    CardAccess, CardDto, CardFields, CardInput, ChangesDto, ImageKind, Place, StoredImage,
 };
 use super::policy::{self, Ownership, Viewer};
 use super::repo;
 use crate::accounts::repo as accounts_repo;
+use crate::brands::repo as brands_repo;
 use crate::error::ApiError;
 
 const MAX_STORE_NAME_CHARS: usize = 64;
 const MAX_MEMBER_NAME_CHARS: usize = 64;
 const MAX_NOTES_CHARS: usize = 1000;
+/// Shops marked by hand per card; more would mean the brand link is missing.
+pub const MAX_PLACES_PER_CARD: usize = 20;
+const MAX_PLACE_LABEL_CHARS: usize = 64;
 /// Far beyond a real wallet; stops a stolen session from filling the disk.
 pub const MAX_CARDS_PER_USER: i64 = 500;
 /// Photo storage per card owner (photos are ~100 KB after re-encoding).
@@ -37,7 +43,34 @@ async fn viewer_in(conn: &mut SqliteConnection, user_id: Uuid) -> Result<Viewer,
 pub async fn list_cards(pool: &SqlitePool, user_id: Uuid) -> Result<Vec<CardDto>, ApiError> {
     let mut conn = pool.acquire().await?;
     let viewer = viewer_in(&mut conn, user_id).await?;
-    Ok(repo::list_visible(&mut *conn, viewer.user_id, viewer.household_id).await?)
+    visible_cards(&mut conn, viewer).await
+}
+
+/// Cards the viewer can see, with their hand-marked places.
+async fn visible_cards(
+    conn: &mut SqliteConnection,
+    viewer: Viewer,
+) -> Result<Vec<CardDto>, ApiError> {
+    let cards = repo::list_visible(&mut *conn, viewer.user_id, viewer.household_id).await?;
+    let places = repo::visible_places(&mut *conn, viewer.user_id, viewer.household_id).await?;
+    Ok(attach_places(cards, places))
+}
+
+fn attach_places(cards: Vec<CardDto>, places: Vec<(Uuid, String, f64, f64)>) -> Vec<CardDto> {
+    let mut by_card: HashMap<Uuid, Vec<Place>> = HashMap::new();
+    for (card_id, label, lat, lon) in places {
+        by_card
+            .entry(card_id)
+            .or_default()
+            .push(Place { label, lat, lon });
+    }
+    cards
+        .into_iter()
+        .map(|card| CardDto {
+            places: by_card.remove(&card.id).unwrap_or_default(),
+            ..card
+        })
+        .collect()
 }
 
 /// Pull sync. With a handful of users and cards a full snapshot is cheaper and
@@ -54,7 +87,7 @@ pub async fn changes_since(
     let cards = if since == cursor {
         None
     } else {
-        Some(repo::list_visible(&mut *tx, viewer.user_id, viewer.household_id).await?)
+        Some(visible_cards(&mut tx, viewer).await?)
     };
     tx.commit().await?;
     Ok(ChangesDto { cursor, cards })
@@ -75,6 +108,11 @@ pub async fn put_card(
     let fields = validate(input)?;
 
     let mut tx = pool.begin().await?;
+    if let Some(brand_id) = fields.brand_id
+        && !brands_repo::exists(&mut *tx, brand_id).await?
+    {
+        return Err(ApiError::Validation("unknown brand".into()));
+    }
     let seq = repo::next_change_seq(&mut *tx).await?;
     let viewer = viewer_in(&mut tx, user_id).await?;
     match repo::find_access(&mut *tx, id).await? {
@@ -95,6 +133,7 @@ pub async fn put_card(
         }
         Some(_) => return Err(ApiError::NotFound),
     }
+    repo::replace_places(&mut tx, id, &fields.places).await?;
     let card = load_dto(&mut tx, viewer, id).await?;
     tx.commit().await?;
     Ok(card)
@@ -126,6 +165,7 @@ pub async fn delete_card(
     }
     repo::delete_images_of_card(&mut *tx, id).await?;
     repo::delete_prefs_of_card(&mut *tx, id).await?;
+    repo::delete_places_of_card(&mut *tx, id).await?;
     repo::tombstone_card(&mut *tx, id, now, seq).await?;
     tx.commit().await?;
     Ok(())
@@ -308,9 +348,11 @@ async fn load_dto(
     viewer: Viewer,
     id: Uuid,
 ) -> Result<CardDto, ApiError> {
-    repo::find_dto(conn, viewer.user_id, id)
+    let card = repo::find_dto(&mut *conn, viewer.user_id, id)
         .await?
-        .ok_or_else(|| ApiError::Internal(format!("card {id} vanished inside its transaction")))
+        .ok_or_else(|| ApiError::Internal(format!("card {id} vanished inside its transaction")))?;
+    let places = repo::places_of(&mut *conn, id).await?;
+    Ok(CardDto { places, ..card })
 }
 
 /// Trims and validates every field of a card.
@@ -323,7 +365,35 @@ pub fn validate(input: CardInput) -> Result<CardFields, ApiError> {
         member_name: optional_text("member name", input.member_name, MAX_MEMBER_NAME_CHARS)?,
         color: input.color.map(|c| validate_color(&c)).transpose()?,
         notes: optional_multiline("notes", input.notes, MAX_NOTES_CHARS)?,
+        brand_id: input.brand_id,
+        places: validate_places(input.places.unwrap_or_default())?,
     })
+}
+
+fn validate_places(places: Vec<Place>) -> Result<Vec<Place>, ApiError> {
+    if places.len() > MAX_PLACES_PER_CARD {
+        return Err(ApiError::Validation(format!(
+            "a card can have at most {MAX_PLACES_PER_CARD} places"
+        )));
+    }
+    places
+        .into_iter()
+        .map(|place| {
+            let valid_position = place.lat.is_finite()
+                && place.lon.is_finite()
+                && (-90.0..=90.0).contains(&place.lat)
+                && (-180.0..=180.0).contains(&place.lon);
+            if !valid_position {
+                return Err(ApiError::Validation(
+                    "place coordinates are out of range".into(),
+                ));
+            }
+            Ok(Place {
+                label: required_text("place name", &place.label, MAX_PLACE_LABEL_CHARS)?,
+                ..place
+            })
+        })
+        .collect()
 }
 
 fn required_text(field: &str, raw: &str, max: usize) -> Result<String, ApiError> {
@@ -399,6 +469,12 @@ mod tests {
             member_name: Some("  ".into()),
             color: Some("#AABBCC".into()),
             notes: Some(" line 1\nline 2 ".into()),
+            brand_id: None,
+            places: Some(vec![Place {
+                label: " Via Roma ".into(),
+                lat: 45.46,
+                lon: 9.19,
+            }]),
         }
     }
 
@@ -410,6 +486,36 @@ mod tests {
         assert_eq!(fields.member_name, None);
         assert_eq!(fields.color.as_deref(), Some("#aabbcc"));
         assert_eq!(fields.notes.as_deref(), Some("line 1\nline 2"));
+        assert_eq!(fields.places[0].label, "Via Roma");
+    }
+
+    #[test]
+    fn validate_rejects_bad_places() {
+        let place = |label: &str, lat: f64, lon: f64| Place {
+            label: label.into(),
+            lat,
+            lon,
+        };
+        let cases = [
+            (vec![place("", 45.0, 9.0)], "place name"),
+            (vec![place("Shop", 91.0, 9.0)], "out of range"),
+            (vec![place("Shop", 45.0, f64::NAN)], "out of range"),
+            (
+                vec![place("Shop", 45.0, 9.0); MAX_PLACES_PER_CARD + 1],
+                "at most",
+            ),
+        ];
+        for (places, expected) in cases {
+            let input = CardInput {
+                places: Some(places),
+                ..input()
+            };
+            let message = validate(input).unwrap_err().to_string();
+            assert!(
+                message.contains(expected),
+                "{message:?} should mention {expected:?}"
+            );
+        }
     }
 
     #[test]

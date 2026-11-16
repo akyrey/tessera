@@ -11,6 +11,7 @@ use crate::accounts::ceremonies::{
 };
 use crate::accounts::passkeys::build_webauthn;
 use crate::accounts::sessions::SessionCookie;
+use crate::brands::upstream::Upstream;
 use crate::config::Config;
 use crate::http::rate_limit::RateLimits;
 
@@ -23,11 +24,22 @@ pub struct AppState {
     pub registrations: Arc<CeremonyStore<RegistrationCeremony>>,
     pub logins: Arc<CeremonyStore<DiscoverableAuthentication>>,
     pub rate_limits: Arc<RateLimits>,
+    /// Wikidata and Overpass client.
+    pub upstream: Arc<Upstream>,
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum StateError {
+    #[error("WebAuthn setup failed: {0}")]
+    Webauthn(#[from] WebauthnError),
+    #[error("HTTP client setup failed: {0}")]
+    Http(#[from] reqwest::Error),
 }
 
 impl AppState {
-    pub fn new(config: Config, db: SqlitePool) -> Result<Self, WebauthnError> {
+    pub fn new(config: Config, db: SqlitePool) -> Result<Self, StateError> {
         Ok(Self {
+            upstream: Arc::new(Upstream::new(&config)?),
             webauthn: Arc::new(build_webauthn(&config)?),
             cookie: SessionCookie::from_config(&config),
             registrations: Arc::new(ceremony_store()),

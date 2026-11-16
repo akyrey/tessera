@@ -32,6 +32,21 @@ describe('applyOp', () => {
     expect(existing.storeName).toBe('Esselunga')
   })
 
+  it('carries the brand and places of a save', () => {
+    const place = { label: 'Via Roma', lat: 45, lon: 9 }
+    const saved = applyOp(
+      undefined,
+      { type: 'save', input: { ...input, brandId: 'b1', places: [place] }, brandName: 'Coop' },
+      context,
+    )
+    expect(saved).toMatchObject({ brandId: 'b1', brandName: 'Coop', places: [place] })
+    expect(applyOp(saved, { type: 'save', input }, context)).toMatchObject({
+      brandId: null,
+      brandName: null,
+      places: [],
+    })
+  })
+
   it('handles deletion, favourites, usage and photos', () => {
     const existing = card({ useCount: 2 })
     expect(applyOp(existing, { type: 'delete' }, context)).toBeUndefined()

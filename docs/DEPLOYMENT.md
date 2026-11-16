@@ -43,6 +43,8 @@ container expects, so the manifests can be written and checked against it.
 | `TESSERA_REGION_ISO3166` | no | `IT` | |
 | `TESSERA_NEARBY_RADIUS_M` | no | `200` | 1–5000 |
 | `TESSERA_STORE_REFRESH_INTERVAL` | no | `7d` | humantime syntax (`12h`, `7d`) |
+| `TESSERA_OVERPASS_URL` | no | `https://overpass-api.de/api/interpreter` | Store locations (OpenStreetMap). Any Overpass mirror works |
+| `TESSERA_WIKIDATA_URL` | no | `https://www.wikidata.org/w/api.php` | Brand search |
 | `TESSERA_SESSION_TTL` | no | `30d` | How long a sign-in lasts |
 | `TESSERA_BOOTSTRAP_TOKEN` | no | random | Secret. Fixed first-admin token: 32 random bytes, base64url (`openssl rand -base64 32 \| tr '+/' '-_' \| tr -d '='`); weak values are rejected. Unset: a random link is logged at startup while no users exist |
 | `RUST_LOG` | no | `info` | |
@@ -93,7 +95,10 @@ Then a lost PVC recovers on the next pod start.
 - No Ingress or NodePort. Add a public-hostname route on the existing tunnel → `http://<service>.<namespace>.svc.cluster.local:8080`.
 - NetworkPolicy: allow ingress to port 8080 only from the `cloudflared` pods. The app trusts `CF-Connecting-IP` as the client IP for rate limiting
   (20 auth requests/min and 600 API requests/min per IPv4 address or IPv6 /64), which is only safe while nothing else can reach the pod.
-  Also allow egress to DNS, R2 (Litestream) and, from M5, `overpass-api.de` / `query.wikidata.org`.
+  Also allow egress to DNS, R2 (Litestream), and HTTPS (443) to `overpass-api.de` and `www.wikidata.org`
+  (brand search and weekly store-location refresh; the app works without them, only "nearby" by brand does not).
+  Requests use a generic `User-Agent` (`tessera/<version> (self-hosted loyalty card app)`); users' locations are
+  never sent anywhere: "nearby" is computed on the phone.
 - WAF custom rule: block when `ip.geoip.country ne "IT"`.
 - Caching: the app sends `Cache-Control` on every response: `immutable` for `/assets/*`, `no-cache` for `index.html`/`sw.js`/manifest/icons, `private, immutable` for card photos (`/api/images/*`, browser cache only), `no-store` for everything else (API, probes, errors).
   Keep Cloudflare on "respect origin headers"; don't add "cache everything" rules.

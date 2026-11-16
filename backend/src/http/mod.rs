@@ -15,7 +15,7 @@ use tower_http::trace::TraceLayer;
 
 use crate::error::ApiError;
 use crate::state::AppState;
-use crate::{accounts, cards};
+use crate::{accounts, brands, cards};
 
 pub use meta::AppInfo;
 
@@ -29,6 +29,7 @@ pub fn router(state: AppState) -> Router {
         .route("/version", get(meta::version))
         .merge(accounts::routes(&state))
         .merge(cards::routes())
+        .merge(brands::routes(&state))
         .fallback(api_not_found)
         .layer(DefaultBodyLimit::max(API_BODY_LIMIT))
         .layer(middleware::from_fn_with_state(

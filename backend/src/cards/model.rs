@@ -24,8 +24,18 @@ pub struct CardAccess {
     pub deleted_at: Option<i64>,
 }
 
+/// A shop location marked by hand (missing from OpenStreetMap).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[ts(export)]
+pub struct Place {
+    pub label: String,
+    pub lat: f64,
+    pub lon: f64,
+}
+
 /// Validated card fields, ready to be stored.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct CardFields {
     pub store_name: String,
     pub card_number: String,
@@ -33,6 +43,8 @@ pub struct CardFields {
     pub member_name: Option<String>,
     pub color: Option<String>,
     pub notes: Option<String>,
+    pub brand_id: Option<Uuid>,
+    pub places: Vec<Place>,
 }
 
 // ---------- DTOs ----------
@@ -52,6 +64,12 @@ pub struct CardInput {
     pub color: Option<String>,
     #[ts(optional)]
     pub notes: Option<String>,
+    /// Store brand, for finding nearby shops.
+    #[ts(optional)]
+    pub brand_id: Option<Uuid>,
+    /// Shops marked by hand; replaces the stored list.
+    #[ts(optional)]
+    pub places: Option<Vec<Place>>,
 }
 
 /// Body of `PUT /api/cards/{id}/sharing`.
@@ -71,7 +89,7 @@ pub struct CardPrefsInput {
 }
 
 /// A card as the signed-in user sees it, including their own preferences.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, sqlx::FromRow, TS)]
+#[derive(Debug, Clone, PartialEq, Serialize, sqlx::FromRow, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
 pub struct CardDto {
@@ -94,6 +112,11 @@ pub struct CardDto {
     pub last_used_at: Option<i64>,
     pub front_image_id: Option<Uuid>,
     pub back_image_id: Option<Uuid>,
+    pub brand_id: Option<Uuid>,
+    pub brand_name: Option<String>,
+    /// Filled after the row is read (separate table).
+    #[sqlx(skip)]
+    pub places: Vec<Place>,
     #[ts(type = "number")]
     pub created_at: i64,
     #[ts(type = "number")]
@@ -117,7 +140,7 @@ pub struct StoredImage {
 }
 
 /// Answer to `GET /api/changes?since=`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
 pub struct ChangesDto {

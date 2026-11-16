@@ -19,6 +19,8 @@ const DEFAULT_REGION: &str = "IT";
 const DEFAULT_NEARBY_RADIUS_M: u32 = 200;
 const MAX_NEARBY_RADIUS_M: u32 = 5_000;
 const DEFAULT_STORE_REFRESH_INTERVAL: Duration = Duration::from_secs(7 * 24 * 60 * 60);
+const DEFAULT_OVERPASS_URL: &str = "https://overpass-api.de/api/interpreter";
+const DEFAULT_WIKIDATA_URL: &str = "https://www.wikidata.org/w/api.php";
 const DEFAULT_SESSION_TTL: Duration = Duration::from_secs(30 * 24 * 60 * 60);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -37,6 +39,10 @@ pub struct Config {
     pub session_ttl: Duration,
     /// Fixed token for the first-admin invite link; random when unset.
     pub bootstrap_token: Option<Secret>,
+    /// OpenStreetMap Overpass API endpoint (store locations).
+    pub overpass_url: Url,
+    /// Wikidata `api.php` endpoint (brand search).
+    pub wikidata_url: Url,
 }
 
 /// A configuration value that must never appear in logs or `Debug` output.
@@ -107,12 +113,38 @@ impl Config {
             )?,
             session_ttl: parse_duration("SESSION_TTL", get("SESSION_TTL"), DEFAULT_SESSION_TTL)?,
             bootstrap_token: parse_bootstrap_token(get("BOOTSTRAP_TOKEN"))?,
+            overpass_url: parse_upstream_url(
+                "OVERPASS_URL",
+                get("OVERPASS_URL"),
+                DEFAULT_OVERPASS_URL,
+            )?,
+            wikidata_url: parse_upstream_url(
+                "WIKIDATA_URL",
+                get("WIKIDATA_URL"),
+                DEFAULT_WIKIDATA_URL,
+            )?,
         })
     }
 
     /// Origin string (`scheme://host[:port]`) used for Origin-header checks.
     pub fn public_origin(&self) -> String {
         self.public_url.origin().ascii_serialization()
+    }
+}
+
+/// An external API endpoint: https, or http only for a local test double.
+fn parse_upstream_url(
+    name: &'static str,
+    raw: Option<String>,
+    default: &str,
+) -> Result<Url, ConfigError> {
+    let url = Url::parse(raw.as_deref().unwrap_or(default))
+        .map_err(|e| ConfigError::invalid(name, e.to_string()))?;
+    let is_local = matches!(url.host_str(), Some("localhost" | "127.0.0.1"));
+    match url.scheme() {
+        "https" => Ok(url),
+        "http" if is_local => Ok(url),
+        _ => Err(ConfigError::invalid(name, "must use https")),
     }
 }
 
@@ -273,6 +305,28 @@ mod tests {
         );
         assert_eq!(config.session_ttl, DEFAULT_SESSION_TTL);
         assert_eq!(config.public_origin(), "https://tessera.example.com");
+        assert_eq!(config.overpass_url.as_str(), DEFAULT_OVERPASS_URL);
+        assert_eq!(config.wikidata_url.as_str(), DEFAULT_WIKIDATA_URL);
+    }
+
+    #[test]
+    fn upstream_urls_must_be_https_except_local_test_doubles() {
+        let local = load_with_url(&[("OVERPASS_URL", "http://127.0.0.1:9000/api")]).unwrap();
+        assert_eq!(local.overpass_url.as_str(), "http://127.0.0.1:9000/api");
+
+        for (name, value) in [
+            ("OVERPASS_URL", "http://overpass.example/api"),
+            ("WIKIDATA_URL", "ftp://wikidata.example"),
+            ("WIKIDATA_URL", "not a url"),
+        ] {
+            assert!(
+                matches!(
+                    load_with_url(&[(name, value)]),
+                    Err(ConfigError::Invalid { .. })
+                ),
+                "{name}={value}"
+            );
+        }
     }
 
     #[test]

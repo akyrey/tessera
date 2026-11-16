@@ -9,6 +9,7 @@ import {
   setSharing,
   uploadImage,
 } from '../api/cards'
+import { fetchLocations } from '../api/brands'
 import { isApiError } from '../api/client'
 import type { CardDto } from '../api/generated/CardDto'
 import { applyOp, nowSeconds } from './applyOp'
@@ -257,6 +258,22 @@ async function pull(startedIn: number): Promise<void> {
     await writeMeta('cursor', cursor)
   })
   if (cards) warmPhotoCache(cards)
+  await pullLocations(startedIn)
+}
+
+/** Shop locations of linked brands, for "nearby" (only when they changed). */
+async function pullLocations(startedIn: number): Promise<void> {
+  const known = await readMeta('locationsVersion')
+  const { version, radiusM, brands } = await fetchLocations(known)
+  await db.transaction('rw', db.locations, db.meta, async () => {
+    if (dataGeneration() !== startedIn || !session) throw new StaleSyncError()
+    if (brands) {
+      await db.locations.clear()
+      await db.locations.bulkPut(brands)
+    }
+    await writeMeta('locationsVersion', version)
+    await writeMeta('radiusM', radiusM)
+  })
 }
 
 /** Adopts the server's snapshot, keeping local versions of cards with unsent changes. */

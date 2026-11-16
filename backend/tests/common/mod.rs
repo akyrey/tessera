@@ -25,12 +25,22 @@ pub struct TestApp {
     _dir: TempDir,
 }
 
+/// Nothing listens here: tests never reach the real Wikidata or Overpass.
+pub const UNREACHABLE: &str = "http://127.0.0.1:9/";
+
 pub async fn spawn_app() -> TestApp {
+    spawn_app_with_upstream(UNREACHABLE).await
+}
+
+/// An app whose Wikidata and Overpass calls go to `upstream` (a test double).
+pub async fn spawn_app_with_upstream(upstream: &str) -> TestApp {
     let dir = tempfile::tempdir().expect("temp dir");
     let database_url = format!("sqlite://{}", dir.path().join("test.db").display());
     let config = Config::from_lookup(|key| match key {
         "TESSERA_PUBLIC_URL" => Some(ORIGIN.into()),
         "TESSERA_DATABASE_URL" => Some(database_url.clone()),
+        "TESSERA_WIKIDATA_URL" => Some(format!("{upstream}w/api.php")),
+        "TESSERA_OVERPASS_URL" => Some(format!("{upstream}api/interpreter")),
         _ => None,
     })
     .expect("valid config");

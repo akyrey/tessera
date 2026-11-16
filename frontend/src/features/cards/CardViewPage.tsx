@@ -4,6 +4,7 @@ import type { LocalCard } from '../../offline/db'
 import { enqueue } from '../../offline/syncEngine'
 import { useMe } from '../auth/useMe'
 import { Barcode } from './Barcode'
+import { PlacesSection } from './PlacesSection'
 import { CardStatus } from './CardStatus'
 import { cardColor, textOn } from './cardColors'
 import { useCardFromRoute } from './useCardFromRoute'
@@ -64,6 +65,7 @@ function CardView({ card }: { readonly card: LocalCard }) {
         {card.notes && <p className="whitespace-pre-line text-brand-900/80">{card.notes}</p>}
         <Photo label="Front of the card" src={photoSrc(card, 'front')} />
         <Photo label="Back of the card" src={photoSrc(card, 'back')} />
+        <PlacesSection card={card} />
       </div>
     </main>
   )

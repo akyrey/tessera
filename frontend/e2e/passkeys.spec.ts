@@ -172,6 +172,24 @@ test('admin sets up Tessera, invites a household member, and both use passkeys',
     await page.getByRole('link', { name: '‹ Cards' }).click()
   })
 
+  await test.step('a shop marked by hand brings its card to the top there', async () => {
+    await page.context().grantPermissions(['geolocation'])
+    await page.context().setGeolocation({ latitude: 45.4642, longitude: 9.19 })
+    await page.getByRole('link', { name: /Esselunga/ }).click()
+    await page.getByRole('button', { name: /I am at this shop/ }).click()
+    await expect(page.getByText(/Esselunga · 45\.4642, 9\.1900/)).toBeVisible()
+    await page.getByRole('link', { name: '‹ Cards' }).click()
+    await expect(
+      page.getByRole('region', { name: 'Nearby' }).getByRole('link', { name: /Esselunga/ }),
+    ).toBeVisible()
+
+    // Somewhere else, the card is no longer "nearby".
+    await page.context().setGeolocation({ latitude: 41.9, longitude: 12.5 })
+    await page.reload()
+    await expect(page.getByRole('region', { name: 'Favourites' })).toBeVisible()
+    await expect(page.getByRole('region', { name: 'Nearby' })).toHaveCount(0)
+  })
+
   await test.step('admin edits and deletes the card', async () => {
     await page.getByRole('link', { name: /Esselunga/ }).click()
     await page.getByRole('link', { name: 'Edit' }).click()

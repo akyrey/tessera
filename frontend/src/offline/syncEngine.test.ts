@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import * as brandsApi from '../api/brands'
 import * as api from '../api/cards'
 import { ApiError } from '../api/client'
 import { card, owner } from '../test/fixtures'
@@ -15,12 +16,14 @@ import {
 } from './syncEngine'
 
 vi.mock('../api/cards')
+vi.mock('../api/brands')
 
 const input = { storeName: 'Coop', cardNumber: '123', barcodeFormat: 'none' } as const
 const offline = () => new ApiError(0, 'network_error', 'Cannot reach the server')
 let stop: () => void = () => undefined
 
 beforeEach(() => {
+  vi.mocked(brandsApi.fetchLocations).mockResolvedValue({ version: 'v0', radiusM: 200, brands: [] })
   vi.mocked(api.fetchChanges).mockResolvedValue({ cursor: 1, cards: [] })
   vi.mocked(api.saveCard).mockImplementation(async (id) => card({ id }))
 })
@@ -64,6 +67,24 @@ describe('pull', () => {
     vi.mocked(api.fetchChanges).mockResolvedValueOnce({ cursor: 3, cards: [card({ id: 'b' })] })
     await requestSync()
     expect((await db.cards.toArray()).map((c) => c.id)).toEqual(['b'])
+  })
+})
+
+describe('locations', () => {
+  it('stores shop locations and the radius, and skips unchanged versions', async () => {
+    vi.mocked(brandsApi.fetchLocations).mockResolvedValueOnce({
+      version: 'v1',
+      radiusM: 300,
+      brands: [{ brandId: 'b1', points: [[45, 9]] }],
+    })
+    await start()
+    expect(await db.locations.get('b1')).toEqual({ brandId: 'b1', points: [[45, 9]] })
+    expect(await readMeta('radiusM')).toBe(300)
+
+    vi.mocked(brandsApi.fetchLocations).mockResolvedValueOnce({ version: 'v1', radiusM: 300, brands: null })
+    await requestSync()
+    expect(brandsApi.fetchLocations).toHaveBeenLastCalledWith('v1')
+    expect(await db.locations.count()).toBe(1)
   })
 })
 

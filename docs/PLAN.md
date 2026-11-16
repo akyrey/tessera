@@ -114,8 +114,9 @@ The sync cursor is the last `change_seq` the client has seen.
 | `PUT /api/cards/{id}/sharing` | Share with / unshare from the owner's household (owner only) |
 | `PUT /api/cards/{id}/prefs` · `POST /api/cards/{id}/use` | Per-user favourite; usage bump for "recently used" |
 | `PUT/DELETE /api/cards/{id}/images/{front\|back}` · `GET /api/images/{id}` | Raw-body photo upload (≤ 512 KB, type checked against magic bytes), authorized download |
-| `GET /api/brands/search?q=` | Search local brands, falling back to Wikidata |
-| `POST /api/brands` | Link a brand (wikidata id) and trigger a location fetch |
+| `GET /api/brands/search?q=` | Linked brands plus Wikidata candidates |
+| `POST /api/brands` | Link a brand (wikidata id; name fetched from Wikidata) and trigger a location fetch |
+| `GET /api/locations?version=` | Radius and shop points of the brands on visible cards, or `null` when unchanged |
 
 Error envelope: `{ "error": { "code": "...", "message": "..." } }` with proper HTTP status codes.
 
@@ -272,13 +273,29 @@ Each milestone is test-first and ends with something usable on a phone.
   household is now read inside each write transaction. Concurrent edits stay last-write-wins (two users).
   E2E: Alice shares a card, Bea sees "Shared by Alice" with the barcode, Alice unshares, Bea's wallet empties.
 
-### M5 — Nearby
+### M5 — Nearby ✅
 - Brand linking: search Wikidata/local brands when creating a card.
 - Overpass client fetches locations for a brand inside Italy (`area["ISO3166-1"="IT"]`, from `TESSERA_REGION_ISO3166`). Weekly in-process refresh job, rate-limited, generic User-Agent.
 - Store locations for linked brands are synced to IndexedDB.
 - On app open: get one location fix, compute distance with haversine on the device, show a "Nearby" section (radius configurable, default 200 m).
 - Custom places per card for shops missing from OSM.
 - **Done when:** opening the app inside a supermarket puts its card at the top, including offline.
+- *As built:* the card form links a **brand**: `GET /api/brands/search?q=` returns brands already linked plus
+  Wikidata candidates (`wbsearchentities`, Italian labels; still answers with local brands when Wikidata is down);
+  `POST /api/brands {wikidataId}` creates the brand with its name **from Wikidata** (not from the client) and
+  starts an Overpass fetch in the background. Overpass: `nwr["brand:wikidata"=Q…](area ISO3166-1=IT)`, `out center`,
+  one query at a time with ≥ 5 s between queries, generic User-Agent; the job refreshes brands used by a live card
+  every `TESSERA_STORE_REFRESH_INTERVAL` and backs off 6 h after a failure. Both endpoints have their own rate limit
+  (30/min per client). `GET /api/locations?version=` returns the radius and `[lat, lon]` points of every brand on a
+  visible card (or `null` when the version is current); the client stores them in IndexedDB on each sync.
+  Custom places: up to 20 per card, saved with the card ("I am at this shop" on the card view).
+  On the list page the phone takes one location fix (automatically only if already allowed, otherwise from a button),
+  computes haversine distances on the device and shows a "Nearby" section, closest first.
+  TLS: reqwest 0.13 + rustls with the `ring` provider (cross-compiles with zig; roots from the image's CA bundle).
+  Tests use a fake Wikidata/Overpass (axum on a random port); E2E points both at an unreachable local port.
+  E2E: a hand-marked shop brings its card to the top there and not elsewhere (Chromium); nearby by brand on both
+  engines with a stubbed API and a mocked position.
+
 
 ### M6 — Polish / later
 - JSON export/import + encrypted backup; import from Stocard/CSV if exports allow it.

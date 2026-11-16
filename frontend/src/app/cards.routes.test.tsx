@@ -1,6 +1,7 @@
 import { screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import * as accounts from '../api/accounts'
+import * as brandsApi from '../api/brands'
 import * as cards from '../api/cards'
 import { ApiError } from '../api/client'
 import type { CardDto } from '../api/generated/CardDto'
@@ -12,6 +13,7 @@ import { card, member, owner } from '../test/fixtures'
 import { renderRoute } from '../test/renderRoute'
 
 vi.mock('../api/accounts')
+vi.mock('../api/brands')
 vi.mock('../api/cards')
 vi.mock('../features/cards/photos', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../features/cards/photos')>()),
@@ -39,6 +41,7 @@ function serverHas(...serverCards: CardDto[]) {
 }
 
 beforeEach(() => {
+  vi.mocked(brandsApi.fetchLocations).mockResolvedValue({ version: 'v0', radiusM: 200, brands: [] })
   vi.mocked(accounts.fetchMe).mockResolvedValue(owner)
   vi.mocked(cards.imageUrl).mockImplementation((id) => `/api/images/${id}`)
   vi.mocked(cards.saveCard).mockImplementation(async (id) => card({ id }))
@@ -206,6 +209,8 @@ describe('new card', () => {
       memberName: undefined,
       color: '#1d4ed8',
       notes: undefined,
+      brandId: undefined,
+      places: [],
     })
     expect(router.state.location.pathname).toBe(`/cards/${id}`)
   })

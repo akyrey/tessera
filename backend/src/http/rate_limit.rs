@@ -26,12 +26,15 @@ const AUTH_PER_MINUTE: NonZeroU32 = NonZeroU32::new(20).unwrap();
 /// Everything under `/api`.
 const API_PER_MINUTE: NonZeroU32 = NonZeroU32::new(600).unwrap();
 const API_BURST: NonZeroU32 = NonZeroU32::new(120).unwrap();
+/// Requests that call Wikidata for the user (brand search while typing).
+const UPSTREAM_PER_MINUTE: NonZeroU32 = NonZeroU32::new(30).unwrap();
 
 type Limiter = DefaultKeyedRateLimiter<IpAddr>;
 
 pub struct RateLimits {
     auth: Limiter,
     api: Limiter,
+    upstream: Limiter,
 }
 
 impl RateLimits {
@@ -39,6 +42,7 @@ impl RateLimits {
         Self {
             auth: RateLimiter::keyed(Quota::per_minute(AUTH_PER_MINUTE)),
             api: RateLimiter::keyed(Quota::per_minute(API_PER_MINUTE).allow_burst(API_BURST)),
+            upstream: RateLimiter::keyed(Quota::per_minute(UPSTREAM_PER_MINUTE)),
         }
     }
 
@@ -46,6 +50,7 @@ impl RateLimits {
     pub fn retain_recent(&self) {
         self.auth.retain_recent();
         self.api.retain_recent();
+        self.upstream.retain_recent();
     }
 }
 
@@ -61,6 +66,15 @@ pub async fn limit_api(
     next: Next,
 ) -> Result<Response, ApiError> {
     check(&state.rate_limits.api, &request)?;
+    Ok(next.run(request).await)
+}
+
+pub async fn limit_upstream(
+    State(state): State<AppState>,
+    request: Request,
+    next: Next,
+) -> Result<Response, ApiError> {
+    check(&state.rate_limits.upstream, &request)?;
     Ok(next.run(request).await)
 }
 

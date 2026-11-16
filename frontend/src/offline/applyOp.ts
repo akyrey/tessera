@@ -18,7 +18,9 @@ export interface OpContext {
 export function applyOp(card: LocalCard | undefined, op: CardOp, context: OpContext): LocalCard | undefined {
   switch (op.type) {
     case 'save':
-      return card ? { ...card, ...fieldsOf(op.input), updatedAt: context.now } : newCard(context, op.input)
+      return card
+        ? { ...card, ...fieldsOf(op.input, op.brandName), updatedAt: context.now }
+        : newCard(context, op.input, op.brandName)
     case 'delete':
       return undefined
     case 'favorite':
@@ -32,8 +34,11 @@ export function applyOp(card: LocalCard | undefined, op: CardOp, context: OpCont
   }
 }
 
-function fieldsOf(input: CardInput) {
+function fieldsOf(input: CardInput, brandName: string | null | undefined) {
   return {
+    brandId: input.brandId ?? null,
+    brandName: input.brandId ? (brandName ?? null) : null,
+    places: input.places ?? [],
     storeName: input.storeName,
     cardNumber: input.cardNumber,
     barcodeFormat: input.barcodeFormat,
@@ -43,13 +48,13 @@ function fieldsOf(input: CardInput) {
   }
 }
 
-function newCard(context: OpContext, input: CardInput): LocalCard {
+function newCard(context: OpContext, input: CardInput, brandName: string | null | undefined): LocalCard {
   return {
     id: context.cardId,
     ownerId: context.userId,
     ownerName: context.userName,
     shared: false,
-    ...fieldsOf(input),
+    ...fieldsOf(input, brandName),
     isFavorite: false,
     useCount: 0,
     lastUsedAt: null,

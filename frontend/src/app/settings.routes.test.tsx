@@ -1,6 +1,7 @@
 import { screen, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import * as accounts from '../api/accounts'
+import * as brandsApi from '../api/brands'
 import { ApiError } from '../api/client'
 import * as meta from '../api/meta'
 import * as webauthn from '../features/auth/webauthn'
@@ -8,6 +9,7 @@ import { ceremony, member, owner, passkey } from '../test/fixtures'
 import { renderRoute } from '../test/renderRoute'
 
 vi.mock('../api/accounts')
+vi.mock('../api/brands')
 vi.mock('../api/meta')
 vi.mock('../features/auth/webauthn', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../features/auth/webauthn')>()),
@@ -18,6 +20,7 @@ vi.mock('../features/auth/webauthn', async (importOriginal) => ({
 const INVITE_URL = 'https://tessera.example.com/join#secret'
 
 beforeEach(() => {
+  vi.mocked(brandsApi.fetchLocations).mockResolvedValue({ version: 'v0', radiusM: 200, brands: [] })
   vi.mocked(meta.fetchAppInfo).mockResolvedValue({ name: 'tessera', version: '0.1.0' })
   vi.mocked(webauthn.supportsPasskeys).mockReturnValue(true)
   vi.mocked(accounts.fetchMe).mockResolvedValue(owner)

@@ -1,6 +1,7 @@
 //! Tessera: self-hosted loyalty-card wallet.
 
 pub mod accounts;
+pub mod brands;
 pub mod cards;
 pub mod cli;
 pub mod clock;

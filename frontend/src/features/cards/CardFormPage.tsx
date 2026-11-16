@@ -10,6 +10,7 @@ import { Screen } from '../../components/Screen'
 import type { LocalCard } from '../../offline/db'
 import { enqueue } from '../../offline/syncEngine'
 import { useMe } from '../auth/useMe'
+import { type BrandChoice, BrandPicker } from '../brands/BrandPicker'
 import { ScanControls } from '../scan/ScanControls'
 import { CardStatus } from './CardStatus'
 import { ColorPicker } from './ColorPicker'
@@ -48,6 +49,9 @@ function CardForm({ id, existing }: CardFormProps) {
   const [memberName, setMemberName] = useState(existing?.memberName ?? '')
   const [color, setColor] = useState<string | null>(existing?.color ?? null)
   const [notes, setNotes] = useState(existing?.notes ?? '')
+  const [brand, setBrand] = useState<BrandChoice | null>(
+    existing?.brandId ? { id: existing.brandId, name: existing.brandName ?? 'Linked brand' } : null,
+  )
   const [photos, setPhotos] = useState<PhotoChanges>({ front: KEEP_PHOTO, back: KEEP_PHOTO })
   const me = useMe().data
   const isOwner = !existing || existing.ownerId === me?.user.id
@@ -70,10 +74,13 @@ function CardForm({ id, existing }: CardFormProps) {
       memberName: memberName.trim() || undefined,
       color: color ?? undefined,
       notes: notes.trim() || undefined,
+      brandId: brand?.id,
+      // Hand-marked shops are managed from the card view and kept as they are.
+      places: existing?.places ?? [],
     }
     try {
       // Saved on the device at once; the outbox sends it when there is network.
-      await enqueue(id, { type: 'save', input })
+      await enqueue(id, { type: 'save', input, brandName: brand?.name ?? null })
       if (isOwner && shared !== (existing?.shared ?? false)) await enqueue(id, { type: 'share', shared })
       for (const kind of ['front', 'back'] as const) await queuePhoto(id, kind, photos[kind])
     } catch (error) {
@@ -152,6 +159,7 @@ function CardForm({ id, existing }: CardFormProps) {
             />
           )}
         </Field>
+        <BrandPicker value={brand} onChange={setBrand} />
         <ColorPicker value={color} onChange={setColor} />
         <Field label="Notes (optional)">
           {(props) => (

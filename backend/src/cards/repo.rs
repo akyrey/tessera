@@ -6,7 +6,7 @@
 use sqlx::SqliteExecutor;
 use uuid::Uuid;
 
-use super::model::{CardAccess, CardDto, CardFields, ImageKind, StoredImage};
+use super::model::{CardAccess, CardDto, CardFields, ImageKind, Place, StoredImage};
 
 /// Columns of `CardDto` for the user bound as the first parameter.
 const CARD_SELECT: &str = "
@@ -20,6 +20,8 @@ const CARD_SELECT: &str = "
            p.last_used_at,
            (SELECT i.id FROM card_images i WHERE i.card_id = c.id AND i.kind = 'front') AS front_image_id,
            (SELECT i.id FROM card_images i WHERE i.card_id = c.id AND i.kind = 'back') AS back_image_id,
+           c.brand_id,
+           (SELECT b.name FROM brands b WHERE b.id = c.brand_id) AS brand_name,
            c.created_at, c.updated_at
     FROM cards c
     LEFT JOIN card_user_prefs p ON p.card_id = c.id AND p.user_id = ?1";
@@ -93,8 +95,8 @@ pub async fn insert_card(
 ) -> sqlx::Result<()> {
     sqlx::query(
         "INSERT INTO cards (id, owner_id, store_name, card_number, barcode_format,
-                            member_name, color, notes, created_at, updated_at, change_seq)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                            member_name, color, notes, brand_id, created_at, updated_at, change_seq)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(id)
     .bind(owner_id)
@@ -104,6 +106,7 @@ pub async fn insert_card(
     .bind(&fields.member_name)
     .bind(&fields.color)
     .bind(&fields.notes)
+    .bind(fields.brand_id)
     .bind(now)
     .bind(now)
     .bind(seq)
@@ -121,7 +124,8 @@ pub async fn update_card(
 ) -> sqlx::Result<()> {
     sqlx::query(
         "UPDATE cards SET store_name = ?, card_number = ?, barcode_format = ?,
-                          member_name = ?, color = ?, notes = ?, updated_at = ?, change_seq = ?
+                          member_name = ?, color = ?, notes = ?, brand_id = ?,
+                          updated_at = ?, change_seq = ?
          WHERE id = ?",
     )
     .bind(&fields.store_name)
@@ -130,6 +134,7 @@ pub async fn update_card(
     .bind(&fields.member_name)
     .bind(&fields.color)
     .bind(&fields.notes)
+    .bind(fields.brand_id)
     .bind(now)
     .bind(seq)
     .bind(id)
@@ -181,7 +186,8 @@ pub async fn tombstone_card(
     sqlx::query(
         "UPDATE cards SET deleted_at = ?, updated_at = ?, change_seq = ?,
                           store_name = '-', card_number = '-', barcode_format = 'none',
-                          member_name = NULL, color = NULL, notes = NULL, household_id = NULL
+                          member_name = NULL, color = NULL, notes = NULL, household_id = NULL,
+                          brand_id = NULL
          WHERE id = ?",
     )
     .bind(now)
@@ -191,6 +197,71 @@ pub async fn tombstone_card(
     .execute(ex)
     .await
     .map(|_| ())
+}
+
+// ---------- places ----------
+
+pub async fn replace_places(
+    conn: &mut sqlx::SqliteConnection,
+    card_id: Uuid,
+    places: &[Place],
+) -> sqlx::Result<()> {
+    sqlx::query("DELETE FROM card_places WHERE card_id = ?")
+        .bind(card_id)
+        .execute(&mut *conn)
+        .await?;
+    for (position, place) in places.iter().enumerate() {
+        sqlx::query(
+            "INSERT INTO card_places (card_id, position, label, lat, lon) VALUES (?, ?, ?, ?, ?)",
+        )
+        .bind(card_id)
+        .bind(i64::try_from(position).unwrap_or(i64::MAX))
+        .bind(&place.label)
+        .bind(place.lat)
+        .bind(place.lon)
+        .execute(&mut *conn)
+        .await?;
+    }
+    Ok(())
+}
+
+/// Places of the cards visible to the user, keyed by card id.
+pub async fn visible_places(
+    ex: impl SqliteExecutor<'_>,
+    user_id: Uuid,
+    household_id: Option<Uuid>,
+) -> sqlx::Result<Vec<(Uuid, String, f64, f64)>> {
+    sqlx::query_as(
+        "SELECT p.card_id, p.label, p.lat, p.lon FROM card_places p
+         JOIN cards c ON c.id = p.card_id
+         WHERE c.deleted_at IS NULL AND (c.owner_id = ?1 OR c.household_id = ?2)
+         ORDER BY p.card_id, p.position",
+    )
+    .bind(user_id)
+    .bind(household_id)
+    .fetch_all(ex)
+    .await
+}
+
+pub async fn places_of(ex: impl SqliteExecutor<'_>, card_id: Uuid) -> sqlx::Result<Vec<Place>> {
+    let rows: Vec<(String, f64, f64)> = sqlx::query_as(
+        "SELECT label, lat, lon FROM card_places WHERE card_id = ? ORDER BY position",
+    )
+    .bind(card_id)
+    .fetch_all(ex)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .map(|(label, lat, lon)| Place { label, lat, lon })
+        .collect())
+}
+
+pub async fn delete_places_of_card(ex: impl SqliteExecutor<'_>, card_id: Uuid) -> sqlx::Result<()> {
+    sqlx::query("DELETE FROM card_places WHERE card_id = ?")
+        .bind(card_id)
+        .execute(ex)
+        .await
+        .map(|_| ())
 }
 
 // ---------- preferences ----------

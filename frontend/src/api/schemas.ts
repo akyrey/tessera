@@ -1,5 +1,9 @@
 import { z } from 'zod'
 import type { BarcodeFormat } from './generated/BarcodeFormat'
+import type { BrandDto } from './generated/BrandDto'
+import type { BrandSearchDto } from './generated/BrandSearchDto'
+import type { LocationsDto } from './generated/LocationsDto'
+import type { Place } from './generated/Place'
 import type { CardDto } from './generated/CardDto'
 import type { CeremonyStart } from './generated/CeremonyStart'
 import type { ChangesDto } from './generated/ChangesDto'
@@ -79,6 +83,12 @@ export const BARCODE_FORMATS = [
 
 export const barcodeFormatSchema = z.enum(BARCODE_FORMATS) satisfies z.ZodType<BarcodeFormat>
 
+export const placeSchema = z.object({
+  label: z.string(),
+  lat: z.number(),
+  lon: z.number(),
+}) satisfies z.ZodType<Place>
+
 export const cardSchema = z.object({
   id: z.string(),
   ownerId: z.string(),
@@ -95,6 +105,9 @@ export const cardSchema = z.object({
   lastUsedAt: z.number().nullable(),
   frontImageId: z.string().nullable(),
   backImageId: z.string().nullable(),
+  brandId: z.string().nullable(),
+  brandName: z.string().nullable(),
+  places: z.array(placeSchema),
   createdAt: z.number(),
   updatedAt: z.number(),
 }) satisfies z.ZodType<CardDto>
@@ -105,3 +118,27 @@ export const changesSchema = z.object({
   cursor: z.number(),
   cards: z.array(cardSchema).nullable(),
 }) satisfies z.ZodType<ChangesDto>
+
+export const brandSchema = z.object({
+  id: z.string(),
+  wikidataId: z.string(),
+  name: z.string(),
+  locationCount: z.number(),
+  lastSyncedAt: z.number().nullable(),
+}) satisfies z.ZodType<BrandDto>
+
+export const brandSearchSchema = z.object({
+  linked: z.array(brandSchema),
+  candidates: z.array(
+    z.object({ wikidataId: z.string(), name: z.string(), description: z.string().nullable() }),
+  ),
+  remoteUnavailable: z.boolean(),
+}) satisfies z.ZodType<BrandSearchDto>
+
+export const locationsSchema = z.object({
+  version: z.string(),
+  radiusM: z.number(),
+  brands: z
+    .array(z.object({ brandId: z.string(), points: z.array(z.tuple([z.number(), z.number()])) }))
+    .nullable(),
+}) satisfies z.ZodType<LocationsDto>
