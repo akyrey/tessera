@@ -2,7 +2,7 @@
 //!
 //! - A card is visible to its owner and, once shared, to its household.
 //! - Anyone who can see a card can edit it (favourites are per user anyway).
-//! - Only the owner can delete it.
+//! - Only the owner can delete it, or share/unshare it with their household.
 //!
 //! Deleted cards are invisible to everyone.
 
@@ -39,6 +39,10 @@ pub fn can_delete(viewer: Viewer, card: Ownership) -> bool {
     !card.deleted && card.owner_id == viewer.user_id
 }
 
+pub fn can_share(viewer: Viewer, card: Ownership) -> bool {
+    can_delete(viewer, card)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -64,7 +68,7 @@ mod tests {
         }
     }
 
-    /// (viewer, card) → (view, edit, delete)
+    /// (viewer, card) → (view, edit, delete, share)
     #[test]
     fn access_matrix() {
         let cases = [
@@ -72,43 +76,43 @@ mod tests {
                 "owner, private",
                 viewer(ALICE, HOME),
                 card(None, false),
-                (true, true, true),
+                (true, true, true, true),
             ),
             (
                 "owner, shared",
                 viewer(ALICE, HOME),
                 card(Some(HOME), false),
-                (true, true, true),
+                (true, true, true, true),
             ),
             (
                 "member, private",
                 viewer(BEA, HOME),
                 card(None, false),
-                (false, false, false),
+                (false, false, false, false),
             ),
             (
                 "member, shared",
                 viewer(BEA, HOME),
                 card(Some(HOME), false),
-                (true, true, false),
+                (true, true, false, false),
             ),
             (
                 "stranger, shared",
                 viewer(CARLO, OTHER_HOME),
                 card(Some(HOME), false),
-                (false, false, false),
+                (false, false, false, false),
             ),
             (
                 "owner, deleted",
                 viewer(ALICE, HOME),
                 card(None, true),
-                (false, false, false),
+                (false, false, false, false),
             ),
             (
                 "member, deleted shared",
                 viewer(BEA, HOME),
                 card(Some(HOME), true),
-                (false, false, false),
+                (false, false, false, false),
             ),
         ];
 
@@ -117,6 +121,7 @@ mod tests {
                 can_view(viewer, card),
                 can_edit(viewer, card),
                 can_delete(viewer, card),
+                can_share(viewer, card),
             );
             assert_eq!(actual, expected, "{name}");
         }

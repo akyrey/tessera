@@ -83,6 +83,7 @@ function SearchResults({ cards, query }: { readonly cards: readonly CardDto[]; r
 }
 
 function CardGroup({ title, cards }: { readonly title: string; readonly cards: readonly CardDto[] }) {
+  const userId = useMe().data?.user.id
   if (cards.length === 0) return null
   return (
     <section aria-label={title} className="flex flex-col gap-2">
@@ -90,7 +91,7 @@ function CardGroup({ title, cards }: { readonly title: string; readonly cards: r
       <ul className="grid grid-cols-2 gap-3">
         {cards.map((card) => (
           <li key={card.id}>
-            <CardTile card={card} />
+            <CardTile card={card} userId={userId} />
           </li>
         ))}
       </ul>

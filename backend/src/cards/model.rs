@@ -54,6 +54,14 @@ pub struct CardInput {
     pub notes: Option<String>,
 }
 
+/// Body of `PUT /api/cards/{id}/sharing`.
+#[derive(Debug, Clone, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[ts(export)]
+pub struct CardSharingInput {
+    pub shared: bool,
+}
+
 /// Body of `PUT /api/cards/{id}/prefs`.
 #[derive(Debug, Clone, Deserialize, TS)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -69,6 +77,10 @@ pub struct CardPrefsInput {
 pub struct CardDto {
     pub id: Uuid,
     pub owner_id: Uuid,
+    /// Display name of the owner, for "added by" on shared cards.
+    pub owner_name: String,
+    /// Visible to the owner's whole household.
+    pub shared: bool,
     pub store_name: String,
     pub card_number: String,
     pub barcode_format: BarcodeFormat,

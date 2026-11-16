@@ -37,17 +37,23 @@ async fn list(app: &TestApp, session: &str) -> Vec<Value> {
     json(response).await.as_array().cloned().unwrap_or_default()
 }
 
-/// No API shares cards before M4; tests share them directly in the database.
-async fn share_with_household(app: &TestApp, card_id: Uuid) {
-    sqlx::query(
-        "UPDATE cards SET household_id = (
-             SELECT m.household_id FROM household_members m WHERE m.user_id = cards.owner_id)
-         WHERE id = ?",
+async fn set_shared(
+    app: &TestApp,
+    session: &str,
+    card_id: Uuid,
+    shared: bool,
+) -> axum::response::Response {
+    app.put(
+        &format!("{}/sharing", card_uri(card_id)),
+        json!({ "shared": shared }),
+        Some(session),
     )
-    .bind(card_id)
-    .execute(&app.state.db)
     .await
-    .unwrap();
+}
+
+async fn share_with_household(app: &TestApp, session: &str, card_id: Uuid) {
+    let response = set_shared(app, session, card_id, true).await;
+    assert_eq!(response.status(), StatusCode::OK);
 }
 
 // ---------- create, update, list ----------
@@ -224,7 +230,7 @@ async fn shared_cards_can_be_edited_but_not_deleted_by_members() {
     let (alice, alice_session) = app.bootstrap_admin("Alice").await;
     let (_, bea_session) = app.add_member(&alice, "Bea").await;
     let id = create_card(&app, &alice_session).await;
-    share_with_household(&app, id).await;
+    share_with_household(&app, &alice_session, id).await;
 
     assert_eq!(list(&app, &bea_session).await.len(), 1);
     let mut edit = card_body();
@@ -303,7 +309,7 @@ async fn favourites_and_usage_are_per_user() {
     let (alice, alice_session) = app.bootstrap_admin("Alice").await;
     let (_, bea_session) = app.add_member(&alice, "Bea").await;
     let id = create_card(&app, &alice_session).await;
-    share_with_household(&app, id).await;
+    share_with_household(&app, &alice_session, id).await;
 
     let response = app
         .put(
@@ -597,7 +603,7 @@ async fn changes_only_contain_visible_cards() {
     let (_, bea_session) = app.add_member(&alice, "Bea").await;
     let private = create_card(&app, &alice_session).await;
     let shared = create_card(&app, &alice_session).await;
-    share_with_household(&app, shared).await;
+    share_with_household(&app, &alice_session, shared).await;
 
     let snapshot = changes(&app, &bea_session, 0).await;
 
@@ -638,5 +644,77 @@ async fn changes_validate_the_cursor_and_require_a_session() {
     assert_eq!(
         app.get("/api/changes", None).await.status(),
         StatusCode::UNAUTHORIZED
+    );
+}
+
+// ---------- sharing ----------
+
+#[tokio::test]
+async fn sharing_shows_the_card_to_the_household_and_unsharing_hides_it() {
+    let app = spawn_app().await;
+    let (alice, alice_session) = app.bootstrap_admin("Alice").await;
+    let (_, bea_session) = app.add_member(&alice, "Bea").await;
+    let id = create_card(&app, &alice_session).await;
+    assert_eq!(list(&app, &alice_session).await[0]["shared"], false);
+
+    let response = set_shared(&app, &alice_session, id, true).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(json(response).await["shared"], true);
+    let bea_view = &list(&app, &bea_session).await[0];
+    assert_eq!(bea_view["ownerName"], "Alice");
+    assert_eq!(bea_view["shared"], true);
+
+    let cursor = changes(&app, &bea_session, 0).await["cursor"]
+        .as_i64()
+        .unwrap();
+    set_shared(&app, &alice_session, id, false).await;
+    assert_eq!(
+        changes(&app, &bea_session, cursor).await["cards"],
+        json!([])
+    );
+}
+
+#[tokio::test]
+async fn only_the_owner_can_change_sharing() {
+    let app = spawn_app().await;
+    let (alice, alice_session) = app.bootstrap_admin("Alice").await;
+    let (_, bea_session) = app.add_member(&alice, "Bea").await;
+    let shared = create_card(&app, &alice_session).await;
+    share_with_household(&app, &alice_session, shared).await;
+    let private = create_card(&app, &alice_session).await;
+
+    let response = set_shared(&app, &bea_session, shared, false).await;
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    let response = set_shared(&app, &bea_session, private, true).await;
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    app.delete(&card_uri(private), Some(&alice_session)).await;
+    let response = set_shared(&app, &alice_session, private, true).await;
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn photos_of_shared_cards_are_visible_to_the_household() {
+    let app = spawn_app().await;
+    let (alice, alice_session) = app.bootstrap_admin("Alice").await;
+    let (_, bea_session) = app.add_member(&alice, "Bea").await;
+    let id = create_card(&app, &alice_session).await;
+    share_with_household(&app, &alice_session, id).await;
+
+    // A member adds the photo; the owner and the member can both see it.
+    let uri = format!("{}/images/front", card_uri(id));
+    let image = json(
+        app.put_bytes(&uri, "image/jpeg", JPEG.to_vec(), Some(&bea_session))
+            .await,
+    )
+    .await;
+    let image_uri = format!("/api/images/{}", image["id"].as_str().unwrap());
+
+    assert_eq!(
+        app.get(&image_uri, Some(&alice_session)).await.status(),
+        StatusCode::OK
+    );
+    assert_eq!(
+        app.get(&image_uri, Some(&bea_session)).await.status(),
+        StatusCode::OK
     );
 }

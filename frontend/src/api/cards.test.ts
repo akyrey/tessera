@@ -9,6 +9,7 @@ import {
   recordUse,
   saveCard,
   setFavorite,
+  setSharing,
   uploadImage,
 } from './cards'
 
@@ -63,6 +64,14 @@ describe('cards api', () => {
 
     respond(card({ isFavorite: true }))
     await expect(setFavorite('c1', true)).resolves.toMatchObject({ isFavorite: true })
+
+    const sharing = respond(card({ shared: true }))
+    await expect(setSharing('c1', true)).resolves.toMatchObject({ shared: true })
+    expect(lastCall(sharing)).toEqual({
+      path: '/api/cards/c1/sharing',
+      method: 'PUT',
+      body: '{"shared":true}',
+    })
   })
 
   it('uploads photos as raw bodies', async () => {

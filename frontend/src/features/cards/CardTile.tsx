@@ -2,7 +2,13 @@ import { Link } from 'react-router'
 import type { CardDto } from '../../api/generated/CardDto'
 import { cardColor, textOn } from './cardColors'
 
-export function CardTile({ card }: { readonly card: CardDto }) {
+interface CardTileProps {
+  readonly card: CardDto
+  /** Signed-in user, to tell own cards from the household's. */
+  readonly userId: string | undefined
+}
+
+export function CardTile({ card, userId }: CardTileProps) {
   const background = cardColor(card)
   return (
     <Link
@@ -18,7 +24,14 @@ export function CardTile({ card }: { readonly card: CardDto }) {
           </span>
         )}
       </span>
-      {card.memberName && <span className="truncate text-sm opacity-80">{card.memberName}</span>}
+      <span className="flex items-end justify-between gap-1 text-sm opacity-80">
+        <span className="truncate">{card.memberName}</span>
+        {card.shared && (
+          <span className="shrink-0 rounded-full bg-black/15 px-2 text-xs">
+            {card.ownerId === userId ? 'Shared' : card.ownerName}
+          </span>
+        )}
+      </span>
     </Link>
   )
 }

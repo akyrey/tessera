@@ -16,6 +16,8 @@ const ME = {
 const card = (id: string, storeName: string, barcodeFormat: string, cardNumber: string) => ({
   id,
   ownerId: 'u-1',
+  ownerName: 'Alice',
+  shared: false,
   storeName,
   cardNumber,
   barcodeFormat,

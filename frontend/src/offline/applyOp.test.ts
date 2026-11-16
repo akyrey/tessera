@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { card } from '../test/fixtures'
 import { applyOp } from './applyOp'
 
-const context = { cardId: 'c-1', userId: 'u-alice', now: 1_900_000_000 }
+const context = { cardId: 'c-1', userId: 'u-alice', userName: 'Alice', now: 1_900_000_000 }
 const input = { storeName: 'Coop', cardNumber: '123', barcodeFormat: 'none', notes: 'n' } as const
 
 describe('applyOp', () => {
@@ -10,6 +10,8 @@ describe('applyOp', () => {
     expect(applyOp(undefined, { type: 'save', input }, context)).toMatchObject({
       id: 'c-1',
       ownerId: 'u-alice',
+      ownerName: 'Alice',
+      shared: false,
       storeName: 'Coop',
       notes: 'n',
       memberName: null,
@@ -34,6 +36,7 @@ describe('applyOp', () => {
     const existing = card({ useCount: 2 })
     expect(applyOp(existing, { type: 'delete' }, context)).toBeUndefined()
     expect(applyOp(existing, { type: 'favorite', isFavorite: true }, context)?.isFavorite).toBe(true)
+    expect(applyOp(existing, { type: 'share', shared: true }, context)?.shared).toBe(true)
     expect(applyOp(existing, { type: 'use', at: 5 }, context)).toMatchObject({ useCount: 3, lastUsedAt: 5 })
     const photo = { type: 'photo', kind: 'back', photo: null, preview: null } as const
     expect(applyOp(existing, photo, context)?.localPhotos).toEqual({ back: null })

@@ -65,7 +65,7 @@ test('admin sets up Tessera, invites a household member, and both use passkeys',
     return url
   })
 
-  await test.step('a second person joins on their own device', async () => {
+  const memberPage = await test.step('a second person joins on their own device', async () => {
     const context = await browser.newContext()
     const memberPage = await context.newPage()
     await addPasskeyDevice(memberPage)
@@ -81,7 +81,7 @@ test('admin sets up Tessera, invites a household member, and both use passkeys',
     await expect(household.getByText('Alice')).toBeVisible()
     await expect(household.getByText('Bea')).toBeVisible()
     await expect(memberPage.getByRole('button', { name: 'Invite someone' })).toHaveCount(0)
-    await context.close()
+    return memberPage
   })
 
   await test.step('admin sees the new member', async () => {
@@ -183,5 +183,31 @@ test('admin sets up Tessera, invites a household member, and both use passkeys',
     await page.getByRole('button', { name: 'Delete card' }).click()
     await page.getByRole('button', { name: 'Tap again to delete for good' }).click()
     await expect(page.getByRole('heading', { name: 'No cards yet' })).toBeVisible()
+  })
+
+  await test.step('a shared card reaches the household, and unsharing takes it back', async () => {
+    await page.getByRole('link', { name: 'Add card' }).click()
+    await page.getByLabel('Store name').fill('Coop')
+    await page.getByLabel('Barcode type').selectOption('qr')
+    await page.getByLabel('Card number').fill('COOP-FAMILY-1')
+    await page.getByRole('switch', { name: /Share with Home/ }).check()
+    await page.getByRole('button', { name: 'Save card' }).click()
+    await expect(page.getByText('Shared with Home')).toBeVisible()
+
+    await memberPage.goto('/')
+    const sharedTile = memberPage.getByRole('link', { name: /Coop.*Alice/ })
+    await expect(sharedTile).toBeVisible()
+    await sharedTile.click()
+    await expect(memberPage.getByText('Shared by Alice')).toBeVisible()
+    await expect(memberPage.getByRole('img', { name: /QR code/ })).toBeVisible()
+
+    await page.getByRole('link', { name: 'Edit' }).click()
+    await page.getByRole('switch', { name: /Share with Home/ }).uncheck()
+    await page.getByRole('button', { name: 'Save card' }).click()
+    await expect(page.getByText('Shared with Home')).toBeHidden()
+
+    await memberPage.goto('/')
+    await expect(memberPage.getByRole('heading', { name: 'No cards yet' })).toBeVisible()
+    await memberPage.context().close()
   })
 })

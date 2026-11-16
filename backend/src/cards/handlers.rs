@@ -10,8 +10,9 @@ use axum::{Json, Router};
 use uuid::Uuid;
 
 use super::images::{self, MAX_IMAGE_BYTES};
-use super::model::{CardDto, CardInput, CardPrefsInput, ChangesDto, ImageCreated, ImageKind};
-use super::policy::Viewer;
+use super::model::{
+    CardDto, CardInput, CardPrefsInput, CardSharingInput, ChangesDto, ImageCreated, ImageKind,
+};
 use super::service;
 use crate::accounts::sessions::CurrentUser;
 use crate::clock::now_unix;
@@ -34,21 +35,17 @@ pub fn routes() -> Router<AppState> {
         .route("/changes", get(changes))
         .route("/cards/{id}", put(put_card).delete(delete_card))
         .route("/cards/{id}/prefs", put(put_prefs))
+        .route("/cards/{id}/sharing", put(put_sharing))
         .route("/cards/{id}/use", post(record_use))
         .route("/images/{id}", get(get_image))
         .merge(photos)
-}
-
-async fn viewer(state: &AppState, user: CurrentUser) -> Result<Viewer, ApiError> {
-    service::viewer_of(&state.db, &user.0).await
 }
 
 async fn list_cards(
     State(state): State<AppState>,
     user: CurrentUser,
 ) -> Result<Json<Vec<CardDto>>, ApiError> {
-    let viewer = viewer(&state, user).await?;
-    service::list_cards(&state.db, viewer).await.map(Json)
+    service::list_cards(&state.db, user.0.id).await.map(Json)
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -63,8 +60,7 @@ async fn changes(
     query: Result<Query<ChangesQuery>, QueryRejection>,
 ) -> Result<Json<ChangesDto>, ApiError> {
     let Query(query) = query.map_err(|e| ApiError::Validation(e.body_text()))?;
-    let viewer = viewer(&state, user).await?;
-    service::changes_since(&state.db, viewer, query.since)
+    service::changes_since(&state.db, user.0.id, query.since)
         .await
         .map(Json)
 }
@@ -75,8 +71,7 @@ async fn put_card(
     ApiPath(id): ApiPath<Uuid>,
     ApiJson(input): ApiJson<CardInput>,
 ) -> Result<Json<CardDto>, ApiError> {
-    let viewer = viewer(&state, user).await?;
-    service::put_card(&state.db, viewer, id, input, now_unix())
+    service::put_card(&state.db, user.0.id, id, input, now_unix())
         .await
         .map(Json)
 }
@@ -86,8 +81,7 @@ async fn delete_card(
     user: CurrentUser,
     ApiPath(id): ApiPath<Uuid>,
 ) -> Result<StatusCode, ApiError> {
-    let viewer = viewer(&state, user).await?;
-    service::delete_card(&state.db, viewer, id, now_unix()).await?;
+    service::delete_card(&state.db, user.0.id, id, now_unix()).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -97,8 +91,18 @@ async fn put_prefs(
     ApiPath(id): ApiPath<Uuid>,
     ApiJson(input): ApiJson<CardPrefsInput>,
 ) -> Result<Json<CardDto>, ApiError> {
-    let viewer = viewer(&state, user).await?;
-    service::set_favorite(&state.db, viewer, id, input.is_favorite)
+    service::set_favorite(&state.db, user.0.id, id, input.is_favorite)
+        .await
+        .map(Json)
+}
+
+async fn put_sharing(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    ApiPath(id): ApiPath<Uuid>,
+    ApiJson(input): ApiJson<CardSharingInput>,
+) -> Result<Json<CardDto>, ApiError> {
+    service::set_sharing(&state.db, user.0.id, id, input.shared, now_unix())
         .await
         .map(Json)
 }
@@ -108,8 +112,7 @@ async fn record_use(
     user: CurrentUser,
     ApiPath(id): ApiPath<Uuid>,
 ) -> Result<StatusCode, ApiError> {
-    let viewer = viewer(&state, user).await?;
-    service::record_use(&state.db, viewer, id, now_unix()).await?;
+    service::record_use(&state.db, user.0.id, id, now_unix()).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -125,8 +128,8 @@ async fn put_image(
         .and_then(|value| value.to_str().ok());
     let body = body?;
     let mime = images::check_upload(content_type, &body)?;
-    let viewer = viewer(&state, user).await?;
-    let id = service::put_image(&state.db, viewer, card_id, kind, mime, &body, now_unix()).await?;
+    let id =
+        service::put_image(&state.db, user.0.id, card_id, kind, mime, &body, now_unix()).await?;
     Ok(Json(ImageCreated { id }))
 }
 
@@ -135,8 +138,7 @@ async fn delete_image(
     user: CurrentUser,
     ApiPath((card_id, kind)): ApiPath<(Uuid, ImageKind)>,
 ) -> Result<StatusCode, ApiError> {
-    let viewer = viewer(&state, user).await?;
-    service::delete_image(&state.db, viewer, card_id, kind, now_unix()).await?;
+    service::delete_image(&state.db, user.0.id, card_id, kind, now_unix()).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -145,8 +147,7 @@ async fn get_image(
     user: CurrentUser,
     ApiPath(id): ApiPath<Uuid>,
 ) -> Result<Response, ApiError> {
-    let viewer = viewer(&state, user).await?;
-    let image = service::get_image(&state.db, viewer, id).await?;
+    let image = service::get_image(&state.db, user.0.id, id).await?;
     let content_type = HeaderValue::from_str(&image.mime)
         .map_err(|e| ApiError::internal("stored image type", e))?;
     Ok((

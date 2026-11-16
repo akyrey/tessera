@@ -4,4 +4,12 @@ import type { BarcodeFormat } from "./BarcodeFormat";
 /**
  * A card as the signed-in user sees it, including their own preferences.
  */
-export type CardDto = { id: string, ownerId: string, storeName: string, cardNumber: string, barcodeFormat: BarcodeFormat, memberName: string | null, color: string | null, notes: string | null, isFavorite: boolean, useCount: number, lastUsedAt: number | null, frontImageId: string | null, backImageId: string | null, createdAt: number, updatedAt: number, };
+export type CardDto = { id: string, ownerId: string, 
+/**
+ * Display name of the owner, for "added by" on shared cards.
+ */
+ownerName: string, 
+/**
+ * Visible to the owner's whole household.
+ */
+shared: boolean, storeName: string, cardNumber: string, barcodeFormat: BarcodeFormat, memberName: string | null, color: string | null, notes: string | null, isFavorite: boolean, useCount: number, lastUsedAt: number | null, frontImageId: string | null, backImageId: string | null, createdAt: number, updatedAt: number, };

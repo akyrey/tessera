@@ -82,6 +82,8 @@ export const barcodeFormatSchema = z.enum(BARCODE_FORMATS) satisfies z.ZodType<B
 export const cardSchema = z.object({
   id: z.string(),
   ownerId: z.string(),
+  ownerName: z.string(),
+  shared: z.boolean(),
   storeName: z.string(),
   cardNumber: z.string(),
   barcodeFormat: barcodeFormatSchema,

@@ -10,7 +10,10 @@ use super::model::{CardAccess, CardDto, CardFields, ImageKind, StoredImage};
 
 /// Columns of `CardDto` for the user bound as the first parameter.
 const CARD_SELECT: &str = "
-    SELECT c.id, c.owner_id, c.store_name, c.card_number, c.barcode_format,
+    SELECT c.id, c.owner_id,
+           (SELECT u.display_name FROM users u WHERE u.id = c.owner_id) AS owner_name,
+           c.household_id IS NOT NULL AS shared,
+           c.store_name, c.card_number, c.barcode_format,
            c.member_name, c.color, c.notes,
            COALESCE(p.is_favorite, 0) AS is_favorite,
            COALESCE(p.use_count, 0) AS use_count,
@@ -133,6 +136,23 @@ pub async fn update_card(
     .execute(ex)
     .await
     .map(|_| ())
+}
+
+pub async fn set_household(
+    ex: impl SqliteExecutor<'_>,
+    id: Uuid,
+    household_id: Option<Uuid>,
+    now: i64,
+    seq: i64,
+) -> sqlx::Result<()> {
+    sqlx::query("UPDATE cards SET household_id = ?, updated_at = ?, change_seq = ? WHERE id = ?")
+        .bind(household_id)
+        .bind(now)
+        .bind(seq)
+        .bind(id)
+        .execute(ex)
+        .await
+        .map(|_| ())
 }
 
 /// Marks a card as changed without touching its fields (e.g. a new photo).

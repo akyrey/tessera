@@ -31,6 +31,11 @@ export function setFavorite(id: string, isFavorite: boolean): Promise<CardDto> {
   return putJson(`${cardPath(id)}/prefs`, cardSchema, { isFavorite })
 }
 
+/** Shares the card with the owner's household, or makes it private (owner only). */
+export function setSharing(id: string, shared: boolean): Promise<CardDto> {
+  return putJson(`${cardPath(id)}/sharing`, cardSchema, { shared })
+}
+
 /** Counts an opening of the card, for "recently used". */
 export function recordUse(id: string): Promise<void> {
   return sendRequest('POST', `${cardPath(id)}/use`)

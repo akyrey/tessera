@@ -4,15 +4,18 @@ import type { CardOp, LocalCard } from './db'
 /** Unix seconds, the unit the API uses. */
 export const nowSeconds = (): number => Math.floor(Date.now() / 1000)
 
+export interface OpContext {
+  readonly cardId: string
+  readonly userId: string
+  readonly userName: string
+  readonly now: number
+}
+
 /**
  * What the card looks like on this device after `op`, before the server has
  * seen it. `undefined` means the card is gone.
  */
-export function applyOp(
-  card: LocalCard | undefined,
-  op: CardOp,
-  context: { readonly cardId: string; readonly userId: string; readonly now: number },
-): LocalCard | undefined {
+export function applyOp(card: LocalCard | undefined, op: CardOp, context: OpContext): LocalCard | undefined {
   switch (op.type) {
     case 'save':
       return card ? { ...card, ...fieldsOf(op.input), updatedAt: context.now } : newCard(context, op.input)
@@ -20,6 +23,8 @@ export function applyOp(
       return undefined
     case 'favorite':
       return card && { ...card, isFavorite: op.isFavorite }
+    case 'share':
+      return card && { ...card, shared: op.shared }
     case 'use':
       return card && { ...card, useCount: card.useCount + 1, lastUsedAt: op.at }
     case 'photo':
@@ -38,10 +43,12 @@ function fieldsOf(input: CardInput) {
   }
 }
 
-function newCard(context: { cardId: string; userId: string; now: number }, input: CardInput): LocalCard {
+function newCard(context: OpContext, input: CardInput): LocalCard {
   return {
     id: context.cardId,
     ownerId: context.userId,
+    ownerName: context.userName,
+    shared: false,
     ...fieldsOf(input),
     isFavorite: false,
     useCount: 0,

@@ -68,8 +68,10 @@ describe('outbox', () => {
     await enqueue('c1', { type: 'save', input })
     expect((await db.cards.get('c1'))?.storeName).toBe('Coop')
     await enqueue('c1', { type: 'favorite', isFavorite: true })
+    await enqueue('c1', { type: 'share', shared: true })
     await requestSync()
 
+    expect(api.setSharing).toHaveBeenCalledWith('c1', true)
     expect(api.saveCard).toHaveBeenCalledWith('c1', input)
     expect(api.setFavorite).toHaveBeenCalledWith('c1', true)
     expect(vi.mocked(api.saveCard).mock.invocationCallOrder[0]).toBeLessThan(

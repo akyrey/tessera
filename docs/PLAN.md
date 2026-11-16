@@ -111,6 +111,7 @@ The sync cursor is the last `change_seq` the client has seen.
 | `GET /api/changes?since=` | Pull sync: cursor + full snapshot of visible cards, or `null` when unchanged |
 | `GET /api/cards` | Cards visible to me, with my favourite/usage and photo ids (M2; superseded by `/api/changes` for offline use in M3) |
 | `PUT /api/cards/{id}` · `DELETE /api/cards/{id}` | Idempotent upsert (client-chosen UUIDv7) / soft delete leaving a tombstone |
+| `PUT /api/cards/{id}/sharing` | Share with / unshare from the owner's household (owner only) |
 | `PUT /api/cards/{id}/prefs` · `POST /api/cards/{id}/use` | Per-user favourite; usage bump for "recently used" |
 | `PUT/DELETE /api/cards/{id}/images/{front\|back}` · `GET /api/images/{id}` | Raw-body photo upload (≤ 512 KB, type checked against magic bytes), authorized download |
 | `GET /api/brands/search?q=` | Search local brands, falling back to Wikidata |
@@ -251,11 +252,17 @@ Each milestone is test-first and ends with something usable on a phone.
   both engines. Found on the way: a duplicate precache entry silently disabled the service worker, and a late
   "signed out" answer could overwrite a fresh sign-in (now cancelled).
 
-### M4 — Sharing
+### M4 — Sharing ✅
 - "Share with household" toggle on a card, owner-only unshare/delete.
 - Visual badge for shared cards and who added them. Per-user favourites and usage.
 - Policy unit tests for every visibility/edit combination.
 - **Done when:** a card my wife shares appears on my phone after sync, and her private cards never do.
+- *As built:* `PUT /api/cards/{id}/sharing {shared}` (owner only: 403 for members, 404 for others) sets the card's
+  `household_id`; cards carry `shared` and `ownerName`. Members can edit shared cards and add photos (counted in the
+  owner's quota) but cannot delete or unshare them. The share switch appears only for the owner and only when the
+  household has more than one member; sharing is queued in the outbox like every other change. The viewer's
+  household is now read inside each write transaction. Concurrent edits stay last-write-wins (two users).
+  E2E: Alice shares a card, Bea sees "Shared by Alice" with the barcode, Alice unshares, Bea's wallet empties.
 
 ### M5 — Nearby
 - Brand linking: search Wikidata/local brands when creating a card.

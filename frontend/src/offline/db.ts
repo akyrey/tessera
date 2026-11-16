@@ -15,6 +15,7 @@ export type CardOp =
   | { readonly type: 'save'; readonly input: CardInput }
   | { readonly type: 'delete' }
   | { readonly type: 'favorite'; readonly isFavorite: boolean }
+  | { readonly type: 'share'; readonly shared: boolean }
   | { readonly type: 'use'; readonly at: number }
   | {
       readonly type: 'photo'

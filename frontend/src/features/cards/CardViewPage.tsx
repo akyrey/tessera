@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react'
 import { Link } from 'react-router'
 import type { LocalCard } from '../../offline/db'
 import { enqueue } from '../../offline/syncEngine'
+import { useMe } from '../auth/useMe'
 import { Barcode } from './Barcode'
 import { CardStatus } from './CardStatus'
 import { cardColor, textOn } from './cardColors'
@@ -49,6 +50,7 @@ function CardView({ card }: { readonly card: LocalCard }) {
         </nav>
         <h1 className="text-3xl font-semibold break-words">{card.storeName}</h1>
         {card.memberName && <p className="opacity-80">{card.memberName}</p>}
+        {card.shared && <SharedNote card={card} />}
       </header>
 
       <section aria-label="Barcode" className="flex flex-col items-center gap-4 px-4 py-8 text-black">
@@ -64,6 +66,16 @@ function CardView({ card }: { readonly card: LocalCard }) {
         <Photo label="Back of the card" src={photoSrc(card, 'back')} />
       </div>
     </main>
+  )
+}
+
+function SharedNote({ card }: { readonly card: LocalCard }) {
+  const me = useMe().data
+  const mine = card.ownerId === me?.user.id
+  return (
+    <p className="text-sm opacity-80">
+      {mine ? `Shared with ${me?.household.name ?? 'your household'}` : `Shared by ${card.ownerName}`}
+    </p>
   )
 }
 

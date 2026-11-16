@@ -13,7 +13,6 @@ use super::model::{
 };
 use super::policy::{self, Ownership, Viewer};
 use super::repo;
-use crate::accounts::model::User;
 use crate::accounts::repo as accounts_repo;
 use crate::error::ApiError;
 
@@ -25,27 +24,32 @@ pub const MAX_CARDS_PER_USER: i64 = 500;
 /// Photo storage per card owner (photos are ~100 KB after re-encoding).
 pub const MAX_IMAGE_BYTES_PER_USER: i64 = 100 * 1024 * 1024;
 
-pub async fn viewer_of(pool: &SqlitePool, user: &User) -> Result<Viewer, ApiError> {
-    let membership = accounts_repo::membership_of(pool, user.id).await?;
+/// The user and their household, read in the caller's transaction so a
+/// membership change cannot slip between the access check and the write.
+async fn viewer_in(conn: &mut SqliteConnection, user_id: Uuid) -> Result<Viewer, ApiError> {
+    let membership = accounts_repo::membership_of(&mut *conn, user_id).await?;
     Ok(Viewer {
-        user_id: user.id,
+        user_id,
         household_id: membership.map(|m| m.household_id),
     })
 }
 
-pub async fn list_cards(pool: &SqlitePool, viewer: Viewer) -> Result<Vec<CardDto>, ApiError> {
-    Ok(repo::list_visible(pool, viewer.user_id, viewer.household_id).await?)
+pub async fn list_cards(pool: &SqlitePool, user_id: Uuid) -> Result<Vec<CardDto>, ApiError> {
+    let mut conn = pool.acquire().await?;
+    let viewer = viewer_in(&mut conn, user_id).await?;
+    Ok(repo::list_visible(&mut *conn, viewer.user_id, viewer.household_id).await?)
 }
 
 /// Pull sync. With a handful of users and cards a full snapshot is cheaper and
 /// simpler than deltas, and it naturally removes deleted or unshared cards.
 pub async fn changes_since(
     pool: &SqlitePool,
-    viewer: Viewer,
+    user_id: Uuid,
     since: i64,
 ) -> Result<ChangesDto, ApiError> {
     // One read transaction: the cursor and the snapshot come from the same state.
     let mut tx = pool.begin().await?;
+    let viewer = viewer_in(&mut tx, user_id).await?;
     let cursor = repo::current_change_seq(&mut *tx).await?;
     let cards = if since == cursor {
         None
@@ -60,7 +64,7 @@ pub async fn changes_since(
 /// request after a lost response does not create a duplicate.
 pub async fn put_card(
     pool: &SqlitePool,
-    viewer: Viewer,
+    user_id: Uuid,
     id: Uuid,
     input: CardInput,
     now: i64,
@@ -72,6 +76,7 @@ pub async fn put_card(
 
     let mut tx = pool.begin().await?;
     let seq = repo::next_change_seq(&mut *tx).await?;
+    let viewer = viewer_in(&mut tx, user_id).await?;
     match repo::find_access(&mut *tx, id).await? {
         None => {
             if repo::count_live_cards_of(&mut *tx, viewer.user_id).await? >= MAX_CARDS_PER_USER {
@@ -98,12 +103,13 @@ pub async fn put_card(
 /// Soft delete. Deleting an already deleted card succeeds (idempotent).
 pub async fn delete_card(
     pool: &SqlitePool,
-    viewer: Viewer,
+    user_id: Uuid,
     id: Uuid,
     now: i64,
 ) -> Result<(), ApiError> {
     let mut tx = pool.begin().await?;
     let seq = repo::next_change_seq(&mut *tx).await?;
+    let viewer = viewer_in(&mut tx, user_id).await?;
     let card = repo::find_access(&mut *tx, id)
         .await?
         .ok_or(ApiError::NotFound)?;
@@ -127,14 +133,53 @@ pub async fn delete_card(
 
 pub async fn set_favorite(
     pool: &SqlitePool,
-    viewer: Viewer,
+    user_id: Uuid,
     id: Uuid,
     is_favorite: bool,
 ) -> Result<CardDto, ApiError> {
     let mut tx = pool.begin().await?;
     let seq = repo::next_change_seq(&mut *tx).await?;
+    let viewer = viewer_in(&mut tx, user_id).await?;
     require_visible(&mut tx, viewer, id).await?;
     repo::set_favorite(&mut *tx, id, viewer.user_id, is_favorite, seq).await?;
+    let card = load_dto(&mut tx, viewer, id).await?;
+    tx.commit().await?;
+    Ok(card)
+}
+
+/// Shares the card with the owner's household, or makes it private again.
+/// Members lose sight of an unshared card on their next sync.
+pub async fn set_sharing(
+    pool: &SqlitePool,
+    user_id: Uuid,
+    id: Uuid,
+    shared: bool,
+    now: i64,
+) -> Result<CardDto, ApiError> {
+    let mut tx = pool.begin().await?;
+    let seq = repo::next_change_seq(&mut *tx).await?;
+    let viewer = viewer_in(&mut tx, user_id).await?;
+    let card = repo::find_access(&mut *tx, id)
+        .await?
+        .ok_or(ApiError::NotFound)?;
+    let access = ownership(&card);
+    if !policy::can_share(viewer, access) {
+        return Err(if policy::can_view(viewer, access) {
+            ApiError::Forbidden
+        } else {
+            ApiError::NotFound
+        });
+    }
+    let household_id = if shared {
+        Some(
+            viewer
+                .household_id
+                .ok_or(ApiError::Conflict("you are not part of a household"))?,
+        )
+    } else {
+        None
+    };
+    repo::set_household(&mut *tx, id, household_id, now, seq).await?;
     let card = load_dto(&mut tx, viewer, id).await?;
     tx.commit().await?;
     Ok(card)
@@ -143,12 +188,13 @@ pub async fn set_favorite(
 /// Counts an opening of the card, for the "recently used" ordering.
 pub async fn record_use(
     pool: &SqlitePool,
-    viewer: Viewer,
+    user_id: Uuid,
     id: Uuid,
     now: i64,
 ) -> Result<(), ApiError> {
     let mut tx = pool.begin().await?;
     let seq = repo::next_change_seq(&mut *tx).await?;
+    let viewer = viewer_in(&mut tx, user_id).await?;
     require_visible(&mut tx, viewer, id).await?;
     repo::record_use(&mut *tx, id, viewer.user_id, now, seq).await?;
     tx.commit().await?;
@@ -157,7 +203,7 @@ pub async fn record_use(
 
 pub async fn put_image(
     pool: &SqlitePool,
-    viewer: Viewer,
+    user_id: Uuid,
     card_id: Uuid,
     kind: ImageKind,
     mime: ImageMime,
@@ -167,6 +213,7 @@ pub async fn put_image(
     let image_id = Uuid::now_v7();
     let mut tx = pool.begin().await?;
     let seq = repo::next_change_seq(&mut *tx).await?;
+    let viewer = viewer_in(&mut tx, user_id).await?;
     let card = require_editable(&mut tx, viewer, card_id).await?;
     let stored = repo::image_bytes_of(&mut *tx, card.owner_id, (card_id, kind)).await?;
     let incoming = i64::try_from(data.len()).unwrap_or(i64::MAX);
@@ -184,13 +231,14 @@ pub async fn put_image(
 /// Removes a photo; removing a photo that is not there succeeds.
 pub async fn delete_image(
     pool: &SqlitePool,
-    viewer: Viewer,
+    user_id: Uuid,
     card_id: Uuid,
     kind: ImageKind,
     now: i64,
 ) -> Result<(), ApiError> {
     let mut tx = pool.begin().await?;
     let seq = repo::next_change_seq(&mut *tx).await?;
+    let viewer = viewer_in(&mut tx, user_id).await?;
     require_editable(&mut tx, viewer, card_id).await?;
     if repo::delete_image(&mut *tx, card_id, kind).await? {
         repo::touch_card(&mut *tx, card_id, now, seq).await?;
@@ -201,10 +249,12 @@ pub async fn delete_image(
 
 pub async fn get_image(
     pool: &SqlitePool,
-    viewer: Viewer,
+    user_id: Uuid,
     image_id: Uuid,
 ) -> Result<StoredImage, ApiError> {
-    let image = repo::find_image(pool, image_id)
+    let mut conn = pool.acquire().await?;
+    let viewer = viewer_in(&mut conn, user_id).await?;
+    let image = repo::find_image(&mut *conn, image_id)
         .await?
         .ok_or(ApiError::NotFound)?;
     let access = Ownership {

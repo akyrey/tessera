@@ -49,6 +49,9 @@ function CardForm({ id, existing }: CardFormProps) {
   const [color, setColor] = useState<string | null>(existing?.color ?? null)
   const [notes, setNotes] = useState(existing?.notes ?? '')
   const [photos, setPhotos] = useState<PhotoChanges>({ front: KEEP_PHOTO, back: KEEP_PHOTO })
+  const me = useMe().data
+  const isOwner = !existing || existing.ownerId === me?.user.id
+  const [shared, setShared] = useState(existing?.shared ?? false)
   const [submitted, setSubmitted] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
 
@@ -71,6 +74,7 @@ function CardForm({ id, existing }: CardFormProps) {
     try {
       // Saved on the device at once; the outbox sends it when there is network.
       await enqueue(id, { type: 'save', input })
+      if (isOwner && shared !== (existing?.shared ?? false)) await enqueue(id, { type: 'share', shared })
       for (const kind of ['front', 'back'] as const) await queuePhoto(id, kind, photos[kind])
     } catch (error) {
       console.error('Saving on this device failed', error)
@@ -160,6 +164,23 @@ function CardForm({ id, existing }: CardFormProps) {
             />
           )}
         </Field>
+        {isOwner && me && me.household.members.length > 1 && (
+          <label className="flex min-h-11 items-center justify-between gap-3 rounded-xl bg-white px-4 py-2 ring-1 ring-brand-900/15">
+            <span>
+              <span className="block font-medium">Share with {me.household.name}</span>
+              <span className="block text-sm text-brand-900/60">
+                Everyone in your household can use and edit it.
+              </span>
+            </span>
+            <input
+              type="checkbox"
+              role="switch"
+              className="size-5 accent-brand-700"
+              checked={shared}
+              onChange={(event) => setShared(event.target.checked)}
+            />
+          </label>
+        )}
         <PhotoField
           label="Front"
           currentSrc={existing ? photoSrc(existing, 'front') : null}

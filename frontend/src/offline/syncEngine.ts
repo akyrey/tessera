@@ -6,6 +6,7 @@ import {
   recordUse,
   saveCard,
   setFavorite,
+  setSharing,
   uploadImage,
 } from '../api/cards'
 import { isApiError } from '../api/client'
@@ -84,9 +85,11 @@ export function startSync(userId: string, onUnauthorized: () => void): () => voi
 
 /** Applies a change on this device right away and queues it for the server. */
 export async function enqueue(cardId: string, op: CardOp): Promise<void> {
-  const userId = session?.userId ?? (await readMeta('me'))?.user.id ?? ''
+  const me = await readMeta('me')
+  const userId = session?.userId ?? me?.user.id ?? ''
+  const userName = me?.user.displayName ?? ''
   await db.transaction('rw', db.cards, db.outbox, async () => {
-    const next = applyOp(await db.cards.get(cardId), op, { cardId, userId, now: nowSeconds() })
+    const next = applyOp(await db.cards.get(cardId), op, { cardId, userId, userName, now: nowSeconds() })
     if (next) await db.cards.put(next)
     else await db.cards.delete(cardId)
 
@@ -181,6 +184,8 @@ function send({ cardId, op }: OutboxEntry): Promise<unknown> {
       return deleteCard(cardId)
     case 'favorite':
       return setFavorite(cardId, op.isFavorite)
+    case 'share':
+      return setSharing(cardId, op.shared)
     case 'use':
       return recordUse(cardId)
     case 'photo':

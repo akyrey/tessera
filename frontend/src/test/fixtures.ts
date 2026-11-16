@@ -32,6 +32,8 @@ export const ceremony = { ceremonyId: 'c-1', options: { publicKey: { challenge: 
 export const card = (overrides: Partial<CardDto> = {}): CardDto => ({
   id: '0190f0c8-0000-7000-8000-000000000001',
   ownerId: 'u-alice',
+  ownerName: 'Alice',
+  shared: false,
   storeName: 'Esselunga',
   cardNumber: '4006381333931',
   barcodeFormat: 'ean13',

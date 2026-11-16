@@ -316,3 +316,50 @@ describe('edit card', () => {
     expect(screen.queryByRole('button', { name: 'Delete card' })).not.toBeInTheDocument()
   })
 })
+
+describe('sharing', () => {
+  it('lets the owner share a card with the household', async () => {
+    vi.mocked(cards.setSharing).mockResolvedValue({ ...esselunga, shared: true })
+
+    const { user, router } = renderRoute('/cards/c-esse/edit')
+    const toggle = await screen.findByRole('switch', { name: /Share with Home/ })
+    expect(toggle).not.toBeChecked()
+    await user.click(toggle)
+    await user.click(screen.getByRole('button', { name: 'Save card' }))
+
+    await waitFor(() => expect(router.state.location.pathname).toBe('/cards/c-esse'))
+    expect(await screen.findByText('Shared with Home')).toBeInTheDocument()
+    await waitFor(() => expect(cards.setSharing).toHaveBeenCalledWith('c-esse', true))
+  })
+
+  it('does not resend sharing when it did not change', async () => {
+    const { user, router } = renderRoute('/cards/c-esse/edit')
+    await user.click(await screen.findByRole('button', { name: 'Save card' }))
+
+    await waitFor(() => expect(router.state.location.pathname).toBe('/cards/c-esse'))
+    await whenIdle()
+    expect(cards.setSharing).not.toHaveBeenCalled()
+  })
+
+  it("shows who shared a household member's card, without sharing controls", async () => {
+    vi.mocked(accounts.fetchMe).mockResolvedValue(member)
+    serverHas({ ...esselunga, shared: true })
+
+    const { user } = renderRoute('/')
+    expect(await screen.findByRole('link', { name: /Esselunga.*Alice/ })).toBeInTheDocument()
+    await user.click(screen.getByRole('link', { name: /Esselunga/ }))
+    expect(await screen.findByText('Shared by Alice')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('link', { name: 'Edit' }))
+    await screen.findByLabelText('Store name')
+    expect(screen.queryByRole('switch')).not.toBeInTheDocument()
+  })
+
+  it('marks own shared cards in the list', async () => {
+    serverHas({ ...esselunga, shared: true })
+
+    renderRoute('/')
+
+    expect(await screen.findByRole('link', { name: /Esselunga.*Shared/ })).toBeInTheDocument()
+  })
+})
