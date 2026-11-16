@@ -3,14 +3,18 @@ import { useId } from 'react'
 import { Alert } from '../../components/Alert'
 import { Button } from '../../components/Button'
 import { Section } from '../../components/Section'
-import { db } from '../../offline/db'
-import { buildBackup, downloadBackup } from './exportCards'
+import { db, readMeta } from '../../offline/db'
+import { buildBackup, downloadBackup, ownCards } from './exportCards'
 import { BackupError, importBackup, readBackup } from './importCards'
 
 export function BackupSection() {
   const inputId = useId()
   const exportCards = useMutation({
-    mutationFn: async () => downloadBackup(await buildBackup(await db.cards.toArray())),
+    mutationFn: async () => {
+      const me = await readMeta('me')
+      if (!me) throw new Error('No signed-in user to export cards for')
+      downloadBackup(await buildBackup(ownCards(await db.cards.toArray(), me.user.id)))
+    },
   })
   const importCards = useMutation({
     mutationFn: async (file: File) => importBackup(await readBackup(file), await db.cards.toArray()),

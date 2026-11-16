@@ -5,6 +5,11 @@ import { BACKUP_FORMAT, BACKUP_VERSION, type Backup, type BackupCard } from './b
 
 const PHOTO_TYPES = ['image/jpeg', 'image/png', 'image/webp']
 
+/** The cards `userId` owns: cards shared by others in the household are theirs to export. */
+export function ownCards(cards: readonly LocalCard[], userId: string): LocalCard[] {
+  return cards.filter((card) => card.ownerId === userId)
+}
+
 /** Builds the backup of `cards`, embedding photos (from the network or the offline cache). */
 export async function buildBackup(cards: readonly LocalCard[], now: Date = new Date()): Promise<Backup> {
   return {

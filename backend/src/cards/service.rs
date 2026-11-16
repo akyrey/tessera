@@ -406,7 +406,10 @@ fn validate_date(raw: &str) -> Result<String, ApiError> {
     let [year, month, day] = parts.as_slice() else {
         return Err(invalid());
     };
-    if year.len() != 4 || month.len() != 2 || day.len() != 2 {
+    let digits =
+        |part: &str, len: usize| part.len() == len && part.bytes().all(|b| b.is_ascii_digit());
+    // `u32::from_str` accepts a leading `+`, which the column's CHECK would then refuse.
+    if !digits(year, 4) || !digits(month, 2) || !digits(day, 2) {
         return Err(invalid());
     }
     let (Ok(year), Ok(month), Ok(day)) = (
@@ -566,6 +569,8 @@ mod tests {
             "2027/01/01",
             "2027-1-1",
             "1999-12-31",
+            "2027-+1-01",
+            "2027-01-+1",
             "abcd-ef-gh",
         ] {
             assert!(validate_date(invalid).is_err(), "{invalid}");
