@@ -5,10 +5,11 @@ container expects, so the manifests can be written and checked against it.
 
 ## Image
 
-- `ghcr.io/<owner>/tessera:<tag>`, built by the `image` job in `.github/workflows/ci.yml` for
+- `docker.io/<dockerhub user>/tessera:<tag>`, built by the `image` job in `.github/workflows/ci.yml` for
   `linux/amd64` and `linux/arm64`, published only after all tests pass. Tags: `sha-<full sha>`, `main`, and `X.Y.Z` / `X.Y` from `vX.Y.Z` git tags.
 - Base: `gcr.io/distroless/static-debian12:nonroot`. A single static binary, `/tessera`, runs as UID/GID **65532**.
-- If the GHCR package is private, the namespace needs an `imagePullSecret`.
+- CI pushes with the repo variable `DOCKERHUB_USERNAME` and the secret `DOCKERHUB_TOKEN` (a Docker Hub access token with Read & Write).
+- If the Docker Hub repository is private, the namespace needs an `imagePullSecret`.
 
 ## Process
 

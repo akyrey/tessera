@@ -33,7 +33,7 @@ Users: me + my wife, with shared cards.
 | Hosting | Home k8s cluster (arm64 + amd64 nodes), exposed via the **existing** in-cluster Cloudflare Tunnel (new public-hostname route) | Public HTTPS with no open ports or Ingress; camera, geolocation and passkeys need HTTPS |
 | Storage | Network-backed storage class (pod may move between nodes) | No node pinning |
 | Backups | Litestream → Cloudflare R2 (S3 API, region `auto`) | Cheap, zero egress, already a Cloudflare user |
-| CI/CD | GitHub Actions → GHCR (multi-arch image) | Repo lives on GitHub |
+| CI/CD | GitHub Actions → Docker Hub (multi-arch image) | Repo lives on GitHub |
 | Config | 12-factor env vars (see §5a) | Same image for every environment |
 | Container | Multi-arch image (`linux/amd64`, `linux/arm64`), static musl binary on distroless | Pod can land on any node |
 | Persistence | Single replica, `Recreate` strategy, RWO PVC; Litestream sidecar replicating SQLite to S3-compatible storage | SQLite has one writer; continuous off-node backup |
@@ -171,7 +171,7 @@ loyalty/
 │  │  └─ components/
 │  └─ e2e/                 Playwright
 ├─ docs/DEPLOYMENT.md     runtime contract for the k8s manifests (owned outside this repo)
-├─ .github/workflows/      ci.yml: lint, tests, e2e, image build + smoke test; push to GHCR on main/tags
+├─ .github/workflows/      ci.yml: lint, tests, e2e, image build + smoke test; push to Docker Hub on main/tags
 ├─ Dockerfile              multi-stage, cross-compiled per target arch
 ├─ docs/PLAN.md
 └─ Makefile                dev, test, lint, build, gen-types, image
@@ -187,7 +187,7 @@ Each milestone is test-first and ends with something usable on a phone.
 - `ts-rs` type generation wired into the build.
 - Multi-arch image via `docker buildx` (`cargo-zigbuild`, no QEMU for the Rust step).
 - `docs/DEPLOYMENT.md`: the contract the (externally owned) kustomize manifests must satisfy — port, probes, env vars, volume, single replica + `Recreate`, Litestream → R2, NetworkPolicy from `cloudflared`, Cloudflare WAF (`IT` only) and cache rules. Deployed with `kubectl apply -k`.
-- GitHub Actions: lint + tests on PRs; on `main`, build and push `ghcr.io/<owner>/tessera:<sha>` for amd64 + arm64. Private GHCR package → `imagePullSecret` in the cluster.
+- GitHub Actions: lint + tests on PRs; on `main`, build and push `docker.io/<user>/tessera:<sha>` for amd64 + arm64. Private Docker Hub repo → `imagePullSecret` in the cluster.
 - Security baseline: HSTS, CSP (with `wasm-unsafe-eval` for the scanner), Permissions-Policy, nosniff, frame denial, per-path cache headers.
   *(Session cookies, Origin check and rate limiting landed in M1 with the first mutating endpoints.)*
 - **Done when:** the PWA installs from the public hostname on iPhone and Android and shows "hello" from the API; a pod restart on the other node architecture keeps the data.
@@ -355,7 +355,7 @@ Each milestone is test-first and ends with something usable on a phone.
 
 ## 10. Open questions
 
-All resolved: name **Tessera** · Italy (`IT`) · existing Cloudflare Tunnel · k8s arm64 + amd64 with network storage · Litestream → R2 · GitHub + GHCR · Tailwind · hostname via env var · `kubectl apply -k` with manifests maintained by me outside this repo.
+All resolved: name **Tessera** · Italy (`IT`) · existing Cloudflare Tunnel · k8s arm64 + amd64 with network storage · Litestream → R2 · GitHub + Docker Hub · Tailwind · hostname via env var · `kubectl apply -k` with manifests maintained by me outside this repo.
 
 ## 11. Naming
 
@@ -366,4 +366,4 @@ All resolved: name **Tessera** · Italy (`IT`) · existing Cloudflare Tunnel · 
 | Tasca | "Pocket" | Friendly, but less obvious |
 | Portacarte | "Card holder" | Descriptive, long for a hostname |
 
-The name drives: binary/crate name, image `ghcr.io/<owner>/<name>`, k8s namespace, env var prefix, PWA name and icon.
+The name drives: binary/crate name, image `docker.io/<user>/<name>`, k8s namespace, env var prefix, PWA name and icon.
