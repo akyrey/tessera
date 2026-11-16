@@ -45,6 +45,23 @@ describe('applyOp', () => {
     expect(applyOp(saved, { type: 'places', places: [] }, context)?.places).toEqual([])
   })
 
+  it('keeps the brand logo only while the brand stays the same', () => {
+    const existing = card({ brandId: 'b1', brandName: 'Coop', brandLogoId: 'logo-1' })
+    const same = applyOp(
+      existing,
+      { type: 'save', input: { ...input, brandId: 'b1' }, brandName: 'Coop' },
+      context,
+    )
+    expect(same?.brandLogoId).toBe('logo-1')
+    const other = applyOp(
+      existing,
+      { type: 'save', input: { ...input, brandId: 'b2' }, brandName: 'Conad' },
+      context,
+    )
+    expect(other?.brandLogoId).toBeNull()
+    expect(applyOp(undefined, { type: 'save', input }, context)?.brandLogoId).toBeNull()
+  })
+
   it('handles deletion, favourites, usage and photos', () => {
     const existing = card({ useCount: 2 })
     expect(applyOp(existing, { type: 'delete' }, context)).toBeUndefined()

@@ -1,9 +1,11 @@
-//! Store brands (Wikidata) and their shop locations (OpenStreetMap Overpass).
+//! Store brands (Wikidata), their logos (Wikimedia Commons) and their shop
+//! locations (OpenStreetMap Overpass).
 //!
 //! The server only stores where shops are; deciding which ones are near
 //! happens on the phone, so the user's location never leaves it.
 
 mod handlers;
+pub mod logo;
 pub mod model;
 pub mod overpass;
 pub mod refresh;

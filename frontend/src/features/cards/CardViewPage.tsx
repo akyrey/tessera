@@ -3,6 +3,7 @@ import { Link } from 'react-router'
 import type { LocalCard } from '../../offline/db'
 import { enqueue } from '../../offline/syncEngine'
 import { useMe } from '../auth/useMe'
+import { BrandLogo } from '../brands/BrandLogo'
 import { Barcode } from './Barcode'
 import { PlacesSection } from './PlacesSection'
 import { expiryLabel } from './expiry'
@@ -50,7 +51,10 @@ function CardView({ card }: { readonly card: LocalCard }) {
             </Link>
           </div>
         </nav>
-        <h1 className="text-3xl font-semibold break-words">{card.storeName}</h1>
+        <div className="flex items-center gap-3">
+          <BrandLogo logoId={card.brandLogoId} className="size-14" />
+          <h1 className="min-w-0 text-3xl font-semibold break-words">{card.storeName}</h1>
+        </div>
         {card.memberName && <p className="opacity-80">{card.memberName}</p>}
         {card.shared && <SharedNote card={card} />}
         {card.expiresOn && <ExpiryNote expiresOn={card.expiresOn} />}

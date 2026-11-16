@@ -46,6 +46,7 @@ container expects, so the manifests can be written and checked against it.
 | `TESSERA_STORE_REFRESH_INTERVAL` | no | `7d` | humantime syntax (`12h`, `7d`) |
 | `TESSERA_OVERPASS_URL` | no | `https://overpass-api.de/api/interpreter` | Store locations (OpenStreetMap). Any Overpass mirror works |
 | `TESSERA_WIKIDATA_URL` | no | `https://www.wikidata.org/w/api.php` | Brand search |
+| `TESSERA_COMMONS_URL` | no | `https://commons.wikimedia.org/w/api.php` | Brand logos (thumbnails are downloaded from `upload.wikimedia.org`) |
 | `TESSERA_SESSION_TTL` | no | `30d` | How long a sign-in lasts |
 | `TESSERA_BOOTSTRAP_TOKEN` | no | random | Secret. Fixed first-admin token: 32 random bytes, base64url (`openssl rand -base64 32 \| tr '+/' '-_' \| tr -d '='`); weak values are rejected. Unset: a random link is logged at startup while no users exist |
 | `RUST_LOG` | no | `info` | |

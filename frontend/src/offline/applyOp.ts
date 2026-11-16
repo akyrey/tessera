@@ -22,6 +22,8 @@ export function applyOp(card: LocalCard | undefined, op: CardOp, context: OpCont
         ? {
             ...card,
             ...fieldsOf(op.input, op.brandName),
+            // Another brand's logo arrives with the next sync.
+            brandLogoId: op.input.brandId === card.brandId ? card.brandLogoId : null,
             places: op.input.places ?? card.places,
             updatedAt: context.now,
           }
@@ -68,6 +70,7 @@ function newCard(context: OpContext, input: CardInput, brandName: string | null 
     lastUsedAt: null,
     frontImageId: null,
     backImageId: null,
+    brandLogoId: null,
     createdAt: context.now,
     updatedAt: context.now,
   }

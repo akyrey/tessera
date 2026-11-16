@@ -25,7 +25,7 @@ pub struct TestApp {
     _dir: TempDir,
 }
 
-/// Nothing listens here: tests never reach the real Wikidata or Overpass.
+/// Nothing listens here: tests never reach the real Wikidata, Commons or Overpass.
 pub const UNREACHABLE: &str = "http://127.0.0.1:9/";
 
 pub async fn spawn_app() -> TestApp {
@@ -41,6 +41,7 @@ pub async fn spawn_app_with_upstream(upstream: &str) -> TestApp {
         "TESSERA_DATABASE_URL" => Some(database_url.clone()),
         "TESSERA_WIKIDATA_URL" => Some(format!("{upstream}w/api.php")),
         "TESSERA_OVERPASS_URL" => Some(format!("{upstream}api/interpreter")),
+        "TESSERA_COMMONS_URL" => Some(format!("{upstream}commons/api.php")),
         _ => None,
     })
     .expect("valid config");

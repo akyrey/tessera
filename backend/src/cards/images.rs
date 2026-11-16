@@ -35,6 +35,13 @@ impl ImageMime {
         }
     }
 
+    /// The type whose magic bytes start `data`, if any.
+    pub fn sniff(data: &[u8]) -> Option<Self> {
+        [Self::Jpeg, Self::Png, Self::Webp]
+            .into_iter()
+            .find(|mime| mime.matches(data))
+    }
+
     fn matches(self, data: &[u8]) -> bool {
         match self {
             Self::Jpeg => data.starts_with(&[0xff, 0xd8, 0xff]),
@@ -69,6 +76,14 @@ mod tests {
     const JPEG: &[u8] = &[0xff, 0xd8, 0xff, 0xe0, 0, 0x10];
     const PNG: &[u8] = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR";
     const WEBP: &[u8] = b"RIFF\x24\0\0\0WEBPVP8 ";
+
+    #[test]
+    fn sniffs_the_type_from_magic_bytes() {
+        assert_eq!(ImageMime::sniff(JPEG), Some(ImageMime::Jpeg));
+        assert_eq!(ImageMime::sniff(PNG), Some(ImageMime::Png));
+        assert_eq!(ImageMime::sniff(WEBP), Some(ImageMime::Webp));
+        assert_eq!(ImageMime::sniff(b"<svg"), None);
+    }
 
     #[test]
     fn accepts_supported_types_with_matching_content() {

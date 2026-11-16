@@ -1,4 +1,4 @@
-//! HTTP access to Wikidata and Overpass: shared client, timeouts, politeness.
+//! HTTP access to Wikidata, Commons and Overpass: shared client, timeouts, politeness.
 
 use std::collections::HashSet;
 use std::time::{Duration, Instant};
@@ -8,8 +8,10 @@ use tokio::sync::Mutex;
 use url::Url;
 use uuid::Uuid;
 
+use super::logo;
 use super::overpass::{self, StoreLocation};
 use super::wikidata::{self, BrandCandidate};
+use crate::cards::images::ImageMime;
 use crate::config::Config;
 
 /// Generic on purpose: identifies the software, not the person running it.
@@ -37,10 +39,18 @@ pub enum UpstreamError {
     Response(String),
 }
 
+/// A logo downloaded from Commons, checked to be a raster image.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FetchedLogo {
+    pub mime: ImageMime,
+    pub data: Vec<u8>,
+}
+
 pub struct Upstream {
     http: reqwest::Client,
     overpass_url: Url,
     wikidata_url: Url,
+    commons_url: Url,
     region: String,
     /// When the last Overpass query finished; also serialises queries.
     overpass_gate: Mutex<Option<Instant>>,
@@ -62,6 +72,7 @@ impl Upstream {
             http,
             overpass_url: config.overpass_url.clone(),
             wikidata_url: config.wikidata_url.clone(),
+            commons_url: config.commons_url.clone(),
             region: config.region_iso3166.clone(),
             overpass_gate: Mutex::new(None),
             pending_first_fetch: std::sync::Mutex::new(HashSet::new()),
@@ -97,8 +108,39 @@ impl Upstream {
         Ok(wikidata::parse_label(&body, qid, LANGUAGE))
     }
 
+    /// The brand's current logo, or `None` when Wikidata lists none or
+    /// Commons cannot render it as a raster thumbnail.
+    pub async fn brand_logo(&self, qid: &str) -> Result<Option<FetchedLogo>, UpstreamError> {
+        let claims = self.wikidata_get(&logo::claim_params(qid)).await?;
+        let Some(file) = logo::parse_logo_file(&claims) else {
+            return Ok(None);
+        };
+        let info = self
+            .api_get(&self.commons_url, &logo::thumb_params(&file))
+            .await?;
+        let Some(thumb_url) = logo::parse_thumb_url(&info, &self.commons_url) else {
+            return Ok(None);
+        };
+        let response = self
+            .http
+            .get(thumb_url)
+            .timeout(WIKIDATA_TIMEOUT)
+            .send()
+            .await?
+            .error_for_status()?;
+        let data = read_limited(response, logo::MAX_LOGO_BYTES).await?;
+        let mime = ImageMime::sniff(&data)
+            .ok_or_else(|| UpstreamError::Response("logo is not a JPEG, PNG or WebP".into()))?;
+        Ok(Some(FetchedLogo { mime, data }))
+    }
+
     async fn wikidata_get(&self, params: &[(&str, String)]) -> Result<Value, UpstreamError> {
-        let mut url = self.wikidata_url.clone();
+        self.api_get(&self.wikidata_url, params).await
+    }
+
+    /// A GET to a MediaWiki `api.php` (Wikidata or Commons).
+    async fn api_get(&self, base: &Url, params: &[(&str, String)]) -> Result<Value, UpstreamError> {
+        let mut url = base.clone();
         url.query_pairs_mut()
             .extend_pairs(params.iter().map(|(key, value)| (*key, value.as_str())));
         let response = self
@@ -153,7 +195,16 @@ impl Upstream {
 }
 
 /// Reads at most `limit` bytes of JSON, failing instead of buffering more.
-async fn read_json(mut response: reqwest::Response, limit: usize) -> Result<Value, UpstreamError> {
+async fn read_json(response: reqwest::Response, limit: usize) -> Result<Value, UpstreamError> {
+    let body = read_limited(response, limit).await?;
+    serde_json::from_slice(&body).map_err(|e| UpstreamError::Response(e.to_string()))
+}
+
+/// Reads at most `limit` bytes of body, failing instead of buffering more.
+async fn read_limited(
+    mut response: reqwest::Response,
+    limit: usize,
+) -> Result<Vec<u8>, UpstreamError> {
     let too_large = || UpstreamError::Response(format!("response larger than {limit} bytes"));
     if response
         .content_length()
@@ -168,5 +219,5 @@ async fn read_json(mut response: reqwest::Response, limit: usize) -> Result<Valu
         }
         body.extend_from_slice(&chunk);
     }
-    serde_json::from_slice(&body).map_err(|e| UpstreamError::Response(e.to_string()))
+    Ok(body)
 }

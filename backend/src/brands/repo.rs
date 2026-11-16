@@ -195,6 +195,110 @@ pub async fn mark_failed(
         .map(|_| ())
 }
 
+// ---------- logos ----------
+
+/// Brands used by a live card whose logo was never looked up or was looked up
+/// before `stale_before`, skipping those that failed after `retry_after_error_before`.
+pub async fn logos_due(
+    ex: impl SqliteExecutor<'_>,
+    stale_before: i64,
+    retry_after_error_before: i64,
+) -> sqlx::Result<Vec<(Uuid, String)>> {
+    sqlx::query_as(
+        "SELECT b.id, b.wikidata_id FROM brands b
+         WHERE EXISTS (SELECT 1 FROM cards c WHERE c.brand_id = b.id AND c.deleted_at IS NULL)
+           AND (b.logo_checked_at IS NULL OR b.logo_checked_at < ?)
+           AND (b.logo_error_at IS NULL OR b.logo_error_at < ?)
+         ORDER BY b.logo_checked_at IS NOT NULL, b.logo_checked_at",
+    )
+    .bind(stale_before)
+    .bind(retry_after_error_before)
+    .fetch_all(ex)
+    .await
+}
+
+/// Whether the brand's logo was ever looked up.
+pub async fn logo_checked(ex: impl SqliteExecutor<'_>, brand_id: Uuid) -> sqlx::Result<bool> {
+    sqlx::query_scalar(
+        "SELECT EXISTS (SELECT 1 FROM brands WHERE id = ? AND logo_checked_at IS NOT NULL)",
+    )
+    .bind(brand_id)
+    .fetch_one(ex)
+    .await
+}
+
+/// The stored logo's bytes, to skip rewriting an unchanged image.
+pub async fn logo_data_of(
+    ex: impl SqliteExecutor<'_>,
+    brand_id: Uuid,
+) -> sqlx::Result<Option<Vec<u8>>> {
+    sqlx::query_scalar("SELECT data FROM brand_logos WHERE brand_id = ?")
+        .bind(brand_id)
+        .fetch_optional(ex)
+        .await
+}
+
+/// Stores the brand's logo under a new id, replacing any previous one.
+pub async fn replace_logo(
+    ex: impl SqliteExecutor<'_>,
+    brand_id: Uuid,
+    mime: &str,
+    data: &[u8],
+    now: i64,
+) -> sqlx::Result<()> {
+    sqlx::query(
+        "INSERT INTO brand_logos (id, brand_id, mime, data, created_at) VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT (brand_id) DO UPDATE
+         SET id = excluded.id, mime = excluded.mime, data = excluded.data,
+             created_at = excluded.created_at",
+    )
+    .bind(Uuid::now_v7())
+    .bind(brand_id)
+    .bind(mime)
+    .bind(data)
+    .bind(now)
+    .execute(ex)
+    .await
+    .map(|_| ())
+}
+
+/// `(mime, bytes)` of a logo.
+pub async fn find_logo(
+    ex: impl SqliteExecutor<'_>,
+    logo_id: Uuid,
+) -> sqlx::Result<Option<(String, Vec<u8>)>> {
+    sqlx::query_as("SELECT mime, data FROM brand_logos WHERE id = ?")
+        .bind(logo_id)
+        .fetch_optional(ex)
+        .await
+}
+
+pub async fn mark_logo_checked(
+    ex: impl SqliteExecutor<'_>,
+    brand_id: Uuid,
+    now: i64,
+) -> sqlx::Result<()> {
+    sqlx::query("UPDATE brands SET logo_checked_at = ?, logo_error_at = NULL WHERE id = ?")
+        .bind(now)
+        .bind(brand_id)
+        .execute(ex)
+        .await
+        .map(|_| ())
+}
+
+pub async fn mark_logo_failed(
+    ex: impl SqliteExecutor<'_>,
+    brand_id: Uuid,
+    now: i64,
+) -> sqlx::Result<()> {
+    sqlx::query("UPDATE brands SET logo_error_at = ? WHERE id = ?")
+        .bind(now)
+        .bind(brand_id)
+        .execute(ex)
+        .await
+        .map(|_| ())
+}
+
 /// `(brand id, last sync)` of every brand linked to a card visible to the user.
 pub async fn visible_brands(
     ex: impl SqliteExecutor<'_>,

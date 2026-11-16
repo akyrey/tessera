@@ -1,4 +1,4 @@
-//! Background job keeping store locations of linked brands up to date.
+//! Background job keeping store locations and logos of linked brands up to date.
 
 use std::time::Duration;
 
@@ -13,12 +13,17 @@ use crate::state::AppState;
 const TICK: Duration = Duration::from_secs(10 * 60);
 /// Wait this long after a failed Overpass query before retrying a brand.
 const ERROR_BACKOFF_SECS: i64 = 6 * 60 * 60;
+/// Logos rarely change; look again once a month.
+const LOGO_REFRESH_SECS: i64 = 30 * 24 * 60 * 60;
 
 pub fn spawn(state: AppState) -> JoinHandle<()> {
     tokio::spawn(async move {
         let mut ticker = tokio::time::interval(TICK);
         loop {
             ticker.tick().await;
+            if let Err(error) = refresh_due_logos(&state, now_unix()).await {
+                tracing::error!(%error, "brand logo refresh failed");
+            }
             if let Err(error) = refresh_due(&state, now_unix()).await {
                 tracing::error!(%error, "store location refresh failed");
             }
@@ -42,19 +47,44 @@ pub async fn refresh_due(state: &AppState, now: i64) -> sqlx::Result<usize> {
     Ok(refreshed)
 }
 
-/// Fetches the shops of a brand that has never been fetched, right after a card
-/// starts using it. At most one such fetch per brand is queued at a time.
+/// Looks up, one by one, the logo of every brand never or long ago checked.
+pub async fn refresh_due_logos(state: &AppState, now: i64) -> sqlx::Result<usize> {
+    let due = repo::logos_due(&state.db, now - LOGO_REFRESH_SECS, now - ERROR_BACKOFF_SECS).await?;
+    let mut stored = 0;
+    for (brand_id, qid) in due {
+        if let Ok(true) =
+            service::refresh_logo(&state.db, &state.upstream, brand_id, &qid, now_unix()).await
+        {
+            stored += 1;
+        }
+    }
+    Ok(stored)
+}
+
+/// Fetches the logo and shops of a brand that has never been fetched, right
+/// after a card starts using it. At most one such fetch per brand is queued at a time.
 pub async fn fetch_if_new(state: &AppState, brand_id: Uuid) {
-    let Ok(Some((qid, None))) = repo::sync_state(&state.db, brand_id).await else {
+    let Ok(Some((qid, last_synced))) = repo::sync_state(&state.db, brand_id).await else {
         return;
     };
-    if !state.upstream.claim_first_fetch(brand_id) {
+    let needs_logo = !repo::logo_checked(&state.db, brand_id)
+        .await
+        .unwrap_or(true);
+    if (last_synced.is_some() && !needs_logo) || !state.upstream.claim_first_fetch(brand_id) {
         return;
     }
     let state = state.clone();
     tokio::spawn(async move {
-        let _ = service::refresh_locations(&state.db, &state.upstream, brand_id, &qid, now_unix())
-            .await;
+        // The logo first: it takes a second, the shops can take a minute.
+        if needs_logo {
+            let _ =
+                service::refresh_logo(&state.db, &state.upstream, brand_id, &qid, now_unix()).await;
+        }
+        if last_synced.is_none() {
+            let _ =
+                service::refresh_locations(&state.db, &state.upstream, brand_id, &qid, now_unix())
+                    .await;
+        }
         state.upstream.release_first_fetch(brand_id);
     });
 }

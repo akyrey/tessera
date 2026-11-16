@@ -9,6 +9,7 @@ use super::repo;
 use super::upstream::Upstream;
 use super::{overpass, wikidata};
 use crate::accounts::repo as accounts_repo;
+use crate::cards::repo as cards_repo;
 use crate::error::ApiError;
 
 /// Searches shorter than this are too vague for a useful Wikidata lookup.
@@ -137,6 +138,57 @@ pub async fn refresh_locations(
     tx.commit().await?;
     tracing::info!(qid, count = locations.len(), "store locations refreshed");
     Ok(locations.len())
+}
+
+/// Looks up the brand's logo and stores it when it changed. Returns whether
+/// the stored logo changed. No logo on Wikidata keeps any logo already stored.
+pub async fn refresh_logo(
+    pool: &SqlitePool,
+    upstream: &Upstream,
+    brand_id: Uuid,
+    qid: &str,
+    now: i64,
+) -> Result<bool, ApiError> {
+    if !wikidata::is_qid(qid) {
+        return Err(ApiError::Internal(format!(
+            "brand {brand_id} has an invalid Wikidata id"
+        )));
+    }
+    let logo = match upstream.brand_logo(qid).await {
+        Ok(Some(logo)) => logo,
+        Ok(None) => {
+            repo::mark_logo_checked(pool, brand_id, now).await?;
+            return Ok(false);
+        }
+        Err(error) => {
+            tracing::warn!(%error, qid, "brand logo lookup failed");
+            repo::mark_logo_failed(pool, brand_id, now).await?;
+            return Err(ApiError::Unavailable);
+        }
+    };
+    // Only this job writes logos, so comparing outside the transaction is safe.
+    let unchanged = repo::logo_data_of(pool, brand_id).await?.as_deref() == Some(&logo.data[..]);
+    if unchanged {
+        repo::mark_logo_checked(pool, brand_id, now).await?;
+        return Ok(false);
+    }
+    let mut tx = pool.begin().await?;
+    // As the first write it takes the write lock; a new cursor also makes every
+    // client pull a fresh snapshot, which carries the new logo id.
+    cards_repo::next_change_seq(&mut *tx).await?;
+    repo::replace_logo(&mut *tx, brand_id, logo.mime.as_str(), &logo.data, now).await?;
+    repo::mark_logo_checked(&mut *tx, brand_id, now).await?;
+    tx.commit().await?;
+    tracing::info!(qid, bytes = logo.data.len(), "brand logo stored");
+    Ok(true)
+}
+
+/// A stored logo: `(mime, bytes)`. Logos are public brand imagery, so any
+/// signed-in user may read any of them.
+pub async fn get_logo(pool: &SqlitePool, logo_id: Uuid) -> Result<(String, Vec<u8>), ApiError> {
+    repo::find_logo(pool, logo_id)
+        .await?
+        .ok_or(ApiError::NotFound)
 }
 
 /// Store locations for every brand on the caller's visible cards.

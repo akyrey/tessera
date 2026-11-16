@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Link } from 'react-router'
 import type { CardDto } from '../../api/generated/CardDto'
+import { BrandLogo } from '../brands/BrandLogo'
 import { cardColor, textOn } from './cardColors'
 import { expiryLabel, expiryState } from './expiry'
 
@@ -21,7 +22,12 @@ export function CardTile({ card, userId }: CardTileProps) {
       style={{ backgroundColor: background, color: textOn(background) }}
     >
       <span className="flex items-start justify-between gap-1">
-        <span className="line-clamp-2 text-lg leading-tight font-semibold break-words">{card.storeName}</span>
+        <span className="flex min-w-0 items-start gap-2">
+          <BrandLogo logoId={card.brandLogoId} />
+          <span className="line-clamp-2 text-lg leading-tight font-semibold break-words">
+            {card.storeName}
+          </span>
+        </span>
         {card.isFavorite && (
           <span aria-label="Favourite" className="shrink-0">
             ★

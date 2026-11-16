@@ -22,6 +22,7 @@ const CARD_SELECT: &str = "
            (SELECT i.id FROM card_images i WHERE i.card_id = c.id AND i.kind = 'back') AS back_image_id,
            c.brand_id,
            (SELECT b.name FROM brands b WHERE b.id = c.brand_id) AS brand_name,
+           (SELECT l.id FROM brand_logos l WHERE l.brand_id = c.brand_id) AS brand_logo_id,
            c.expires_on,
            c.created_at, c.updated_at
     FROM cards c

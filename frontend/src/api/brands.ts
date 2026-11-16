@@ -13,6 +13,11 @@ export function linkBrand(wikidataId: string): Promise<BrandDto> {
   return postJson('/api/brands', brandSchema, { wikidataId })
 }
 
+/** A brand logo stored by the server; ids change with the image, so it can be cached forever. */
+export function brandLogoUrl(logoId: string): string {
+  return `/api/brands/logos/${encodeURIComponent(logoId)}`
+}
+
 /** Shops of the brands on visible cards; `brands: null` when `version` is current. */
 export function fetchLocations(version: string | undefined, signal?: AbortSignal): Promise<LocationsDto> {
   const query = version ? `?version=${encodeURIComponent(version)}` : ''

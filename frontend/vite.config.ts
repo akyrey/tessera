@@ -46,6 +46,16 @@ export default defineConfig({
               cacheableResponse: { statuses: [200] },
             },
           },
+          {
+            // Same for brand logos: a new logo gets a new id.
+            urlPattern: ({ url }) => url.pathname.startsWith('/api/brands/logos/'),
+            handler: 'CacheFirst',
+            options: {
+              cacheName: 'brand-logos',
+              expiration: { maxEntries: 500 },
+              cacheableResponse: { statuses: [200] },
+            },
+          },
         ],
         navigateFallback: '/index.html',
         // Probes and the API must always hit the network.

@@ -127,6 +127,8 @@ pub struct CardDto {
     pub back_image_id: Option<Uuid>,
     pub brand_id: Option<Uuid>,
     pub brand_name: Option<String>,
+    /// Brand logo, served at `/api/brands/logos/{id}`; a new id whenever it changes.
+    pub brand_logo_id: Option<Uuid>,
     pub expires_on: Option<String>,
     /// Filled after the row is read (separate table).
     #[sqlx(skip)]

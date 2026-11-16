@@ -13,7 +13,11 @@ ownerName: string,
 /**
  * Visible to the owner's whole household.
  */
-shared: boolean, storeName: string, cardNumber: string, barcodeFormat: BarcodeFormat, memberName: string | null, color: string | null, notes: string | null, isFavorite: boolean, useCount: number, lastUsedAt: number | null, frontImageId: string | null, backImageId: string | null, brandId: string | null, brandName: string | null, expiresOn: string | null, 
+shared: boolean, storeName: string, cardNumber: string, barcodeFormat: BarcodeFormat, memberName: string | null, color: string | null, notes: string | null, isFavorite: boolean, useCount: number, lastUsedAt: number | null, frontImageId: string | null, backImageId: string | null, brandId: string | null, brandName: string | null, 
+/**
+ * Brand logo, served at `/api/brands/logos/{id}`; a new id whenever it changes.
+ */
+brandLogoId: string | null, expiresOn: string | null, 
 /**
  * Filled after the row is read (separate table).
  */

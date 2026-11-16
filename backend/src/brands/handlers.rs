@@ -2,16 +2,18 @@
 
 use axum::extract::rejection::QueryRejection;
 use axum::extract::{Query, State};
-use axum::http::StatusCode;
+use axum::http::{HeaderValue, StatusCode, header};
+use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router, middleware};
 use serde::Deserialize;
+use uuid::Uuid;
 
 use super::model::{BrandDto, BrandSearchDto, LinkBrandInput, LocationsDto};
 use super::service;
 use crate::accounts::sessions::CurrentUser;
 use crate::clock::now_unix;
-use crate::error::{ApiError, ApiJson};
+use crate::error::{ApiError, ApiJson, ApiPath};
 use crate::http::rate_limit;
 use crate::state::AppState;
 
@@ -26,7 +28,32 @@ pub fn routes(state: &AppState) -> Router<AppState> {
         ));
     Router::new()
         .route("/locations", get(locations))
+        .route("/brands/logos/{id}", get(logo))
         .merge(upstream)
+}
+
+/// Logo ids change whenever a logo is replaced, so a response never goes stale.
+const LOGO_CACHE_CONTROL: &str = "private, max-age=31536000, immutable";
+
+async fn logo(
+    State(state): State<AppState>,
+    _user: CurrentUser,
+    ApiPath(id): ApiPath<Uuid>,
+) -> Result<Response, ApiError> {
+    let (mime, data) = service::get_logo(&state.db, id).await?;
+    let content_type =
+        HeaderValue::from_str(&mime).map_err(|e| ApiError::internal("stored logo type", e))?;
+    Ok((
+        [
+            (header::CONTENT_TYPE, content_type),
+            (
+                header::CACHE_CONTROL,
+                HeaderValue::from_static(LOGO_CACHE_CONTROL),
+            ),
+        ],
+        data,
+    )
+        .into_response())
 }
 
 #[derive(Debug, Deserialize)]
