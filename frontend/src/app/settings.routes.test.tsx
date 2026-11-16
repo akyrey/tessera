@@ -181,3 +181,44 @@ describe('sign out', () => {
     expect(router.state.location.pathname).toBe('/')
   })
 })
+
+describe('backup', () => {
+  it('imports cards from a backup file', async () => {
+    const backup = {
+      format: 'tessera-backup',
+      version: 1,
+      exportedAt: '2027-01-01T00:00:00.000Z',
+      cards: [
+        {
+          storeName: 'Decathlon',
+          cardNumber: '2001234567893',
+          barcodeFormat: 'ean13',
+          memberName: null,
+          color: null,
+          notes: null,
+          expiresOn: null,
+          isFavorite: false,
+          brandName: null,
+          places: [],
+          photos: {},
+        },
+      ],
+    }
+
+    const { user } = renderRoute('/settings')
+    const input = await screen.findByLabelText('Backup file')
+    await user.upload(input, new File([JSON.stringify(backup)], 'backup.json', { type: 'application/json' }))
+
+    expect(await screen.findByText('Imported 1 card.')).toBeInTheDocument()
+  })
+
+  it('explains files that are not backups', async () => {
+    const { user } = renderRoute('/settings')
+    await user.upload(
+      await screen.findByLabelText('Backup file'),
+      new File(['hello'], 'notes.json', { type: 'application/json' }),
+    )
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('not a Tessera backup')
+  })
+})

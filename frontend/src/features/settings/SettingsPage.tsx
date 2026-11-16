@@ -9,6 +9,7 @@ import { clearLocalData, db } from '../../offline/db'
 import { stopSync } from '../../offline/syncEngine'
 import { describeError } from '../auth/errors'
 import { useMe } from '../auth/useMe'
+import { BackupSection } from '../backup/BackupSection'
 import { HouseholdSection } from './HouseholdSection'
 import { PasskeysSection } from './PasskeysSection'
 
@@ -41,6 +42,7 @@ export function SettingsPage() {
       </header>
       <HouseholdSection household={me.household} />
       <PasskeysSection />
+      <BackupSection />
       <div className="flex flex-col gap-2">
         {unsynced > 0 && (
           <p

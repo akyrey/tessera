@@ -190,6 +190,18 @@ test('admin sets up Tessera, invites a household member, and both use passkeys',
     await expect(page.getByRole('region', { name: 'Nearby' })).toHaveCount(0)
   })
 
+  const backupPath = await test.step('admin exports a backup', async () => {
+    await page.getByRole('link', { name: 'Settings' }).click()
+    const download = page.waitForEvent('download')
+    await page.getByRole('button', { name: 'Export cards' }).click()
+    const file = await download
+    expect(file.suggestedFilename()).toMatch(/^tessera-cards-\d{4}-\d{2}-\d{2}\.json$/)
+    const path = test.info().outputPath('backup.json')
+    await file.saveAs(path)
+    await page.getByRole('link', { name: 'Done' }).click()
+    return path
+  })
+
   await test.step('admin edits and deletes the card', async () => {
     await page.getByRole('link', { name: /Esselunga/ }).click()
     await page.getByRole('link', { name: 'Edit' }).click()
@@ -201,6 +213,17 @@ test('admin sets up Tessera, invites a household member, and both use passkeys',
     await page.getByRole('button', { name: 'Delete card' }).click()
     await page.getByRole('button', { name: 'Tap again to delete for good' }).click()
     await expect(page.getByRole('heading', { name: 'No cards yet' })).toBeVisible()
+  })
+
+  await test.step('importing the backup brings the deleted card back, with its photo', async () => {
+    await page.getByRole('link', { name: 'Settings' }).click()
+    await page.getByLabel('Backup file').setInputFiles(backupPath)
+    await expect(page.getByText('Imported 1 card.')).toBeVisible()
+    await page.getByRole('link', { name: 'Done' }).click()
+    await page.getByRole('link', { name: /Esselunga/ }).click()
+    await expect(page.getByText('4006381333931')).toBeVisible()
+    await expect(page.getByRole('img', { name: 'Front of the card' })).toBeVisible()
+    await page.getByRole('link', { name: '‹ Cards' }).click()
   })
 
   await test.step('a shared card reaches the household, and unsharing takes it back', async () => {
