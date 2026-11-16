@@ -36,6 +36,36 @@ describe('loadMe', () => {
   })
 })
 
+describe('session end', () => {
+  it('keeps unsent changes when the session expires', async () => {
+    await rememberMe(owner)
+    await db.outbox.add({ cardId: 'c1', op: { type: 'delete' }, attempts: 0 })
+    vi.mocked(accounts.fetchMe).mockResolvedValue(null)
+
+    await loadMe()
+
+    expect(await db.outbox.count()).toBe(1)
+  })
+
+  it('changes nothing when the check was cancelled by a fresh sign-in', async () => {
+    await rememberMe(owner)
+    await db.cards.put(card())
+    vi.mocked(accounts.fetchMe).mockResolvedValue(null)
+    const controller = new AbortController()
+    controller.abort()
+
+    await loadMe(controller.signal)
+
+    expect(await db.cards.count()).toBe(1)
+  })
+
+  it('falls back to the remembered user on server errors', async () => {
+    await rememberMe(owner)
+    vi.mocked(accounts.fetchMe).mockRejectedValue(new ApiError(502, 'http_error', 'bad gateway'))
+    await expect(loadMe()).resolves.toEqual(owner)
+  })
+})
+
 describe('rememberMe', () => {
   it("drops the previous user's cards when someone else signs in", async () => {
     await rememberMe(owner)

@@ -1,9 +1,18 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import * as api from '../api/cards'
 import { ApiError } from '../api/client'
-import { card } from '../test/fixtures'
-import { db, readMeta } from './db'
-import { enqueue, getSyncStatus, requestSync, retryDelay, startSync, whenIdle } from './syncEngine'
+import { card, owner } from '../test/fixtures'
+import { rememberMe } from './session'
+import { clearLocalData, db, readMeta, writeMeta } from './db'
+import {
+  MAX_SERVER_ATTEMPTS,
+  enqueue,
+  getSyncStatus,
+  requestSync,
+  retryDelay,
+  startSync,
+  whenIdle,
+} from './syncEngine'
 
 vi.mock('../api/cards')
 
@@ -19,6 +28,7 @@ beforeEach(() => {
 afterEach(() => stop())
 
 async function start(onUnauthorized = vi.fn()) {
+  await rememberMe(owner)
   stop = startSync('u-alice', onUnauthorized)
   await whenIdle()
   return onUnauthorized
@@ -152,6 +162,71 @@ describe('outbox', () => {
     expect(sent?.type).toBe('image/webp')
     expect(sent?.size).toBe(2)
     expect(api.deleteImage).toHaveBeenCalledWith('c1', 'back')
+  })
+})
+
+describe('review fixes', () => {
+  it('does not fold a new edit into the save being sent', async () => {
+    await start()
+    let release: () => void = () => undefined
+    vi.mocked(api.saveCard).mockImplementationOnce(
+      (id) => new Promise((resolve) => (release = () => resolve(card({ id })))),
+    )
+    await enqueue('c1', { type: 'save', input })
+    await vi.waitFor(() => expect(api.saveCard).toHaveBeenCalledTimes(1))
+
+    await enqueue('c1', { type: 'save', input: { ...input, storeName: 'Coop 2' } })
+    release()
+    await whenIdle()
+
+    expect(api.saveCard).toHaveBeenLastCalledWith('c1', { ...input, storeName: 'Coop 2' })
+    expect(await db.outbox.count()).toBe(0)
+  })
+
+  it('ignores a pull that finishes after the device was wiped', async () => {
+    await start()
+    let respond: (value: { cursor: number; cards: ReturnType<typeof card>[] }) => void = () => undefined
+    vi.mocked(api.fetchChanges).mockImplementationOnce(() => new Promise((resolve) => (respond = resolve)))
+    const run = requestSync()
+    await vi.waitFor(() => expect(api.fetchChanges).toHaveBeenCalledTimes(2))
+
+    await clearLocalData()
+    respond({ cursor: 42, cards: [card({ id: 'leak' })] })
+    await run
+
+    expect(await db.cards.count()).toBe(0)
+    expect(await readMeta('cursor')).toBeUndefined()
+  })
+
+  it("does not reuse another user's cursor", async () => {
+    await writeMeta('cursor', 77)
+    await start()
+    expect(api.fetchChanges).toHaveBeenCalledWith(-1)
+  })
+
+  it('forces a full snapshot after a refused change', async () => {
+    await start()
+    vi.mocked(api.fetchChanges).mockClear()
+    vi.mocked(api.saveCard).mockRejectedValueOnce(new ApiError(409, 'quota_exceeded', 'too many cards'))
+
+    await enqueue('c1', { type: 'save', input })
+    await whenIdle()
+
+    expect(api.fetchChanges).toHaveBeenLastCalledWith(-1)
+    expect(await db.cards.get('c1')).toBeUndefined()
+  })
+
+  it('gives up on a change the server keeps failing on', async () => {
+    await start()
+    vi.mocked(api.saveCard).mockRejectedValue(new ApiError(500, 'internal', 'internal error'))
+    await db.outbox.add({ cardId: 'c1', op: { type: 'save', input }, attempts: MAX_SERVER_ATTEMPTS - 1 })
+
+    await requestSync()
+
+    expect(await db.outbox.count()).toBe(0)
+    expect(await readMeta('problems')).toEqual([
+      'Changes to a card could not be saved: the server kept failing',
+    ])
   })
 })
 

@@ -251,6 +251,14 @@ Each milestone is test-first and ends with something usable on a phone.
   E2E: offline reload, offline edit and sync-after-reconnect on Chromium; scan-from-photo and offline app shell on
   both engines. Found on the way: a duplicate precache entry silently disabled the service worker, and a late
   "signed out" answer could overwrite a fresh sign-in (now cancelled).
+  Security review follow-ups (done): a save is never coalesced into the entry being sent (lost edit); wipes bump a
+  generation so in-flight pulls cannot write afterwards, sync stops before sign-out, and the signed-in UI waits until
+  the device data belongs to the current user (data of an unknown or other owner is wiped); cursors are per user;
+  a refused change forces a full snapshot (no ghost cards); a change failing with 5xx is given up after 8 tries;
+  a 5xx from `/api/me` also falls back to the cached user; an expired session keeps unsent changes for the same
+  user; sign-out warns about unsynced changes; the camera is released if closed during the permission prompt;
+  scanner failures are shown and the WASM load is retried. Open: after a deploy, a page still running the previous
+  build cannot lazy-load its old bwip-js/scanner chunks (the number stays visible; reopening the app fixes it).
 
 ### M4 — Sharing ✅
 - "Share with household" toggle on a card, owner-only unshare/delete.

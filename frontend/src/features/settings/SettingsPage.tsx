@@ -4,7 +4,9 @@ import { logout, signOutEverywhere } from '../../api/accounts'
 import { Alert } from '../../components/Alert'
 import { Button } from '../../components/Button'
 import { Screen } from '../../components/Screen'
-import { clearLocalData } from '../../offline/db'
+import { useLiveQuery } from 'dexie-react-hooks'
+import { clearLocalData, db } from '../../offline/db'
+import { stopSync } from '../../offline/syncEngine'
 import { describeError } from '../auth/errors'
 import { useMe } from '../auth/useMe'
 import { HouseholdSection } from './HouseholdSection'
@@ -15,8 +17,10 @@ export function SettingsPage() {
   const queryClient = useQueryClient()
   const navigate = useNavigate()
 
+  const unsynced = useLiveQuery(() => db.outbox.count(), []) ?? 0
   const leave = async () => {
     // Shared or lost devices must not keep a copy of the cards.
+    stopSync()
     await clearLocalData()
     queryClient.clear()
     await navigate('/login', { replace: true })
@@ -38,6 +42,16 @@ export function SettingsPage() {
       <HouseholdSection household={me.household} />
       <PasskeysSection />
       <div className="flex flex-col gap-2">
+        {unsynced > 0 && (
+          <p
+            role="status"
+            className="rounded-xl bg-amber-50 px-4 py-2 text-sm text-amber-900 ring-1 ring-amber-200"
+          >
+            {unsynced} {unsynced === 1 ? 'change has' : 'changes have'} not synced yet. Signing out now
+            discards {unsynced === 1 ? 'it' : 'them'}; reconnect first to keep{' '}
+            {unsynced === 1 ? 'it' : 'them'}.
+          </p>
+        )}
         <Button variant="secondary" busy={signOut.isPending} onClick={() => signOut.mutate()}>
           Sign out
         </Button>

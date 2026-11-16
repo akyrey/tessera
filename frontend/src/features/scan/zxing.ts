@@ -70,6 +70,10 @@ function loadReader(): Promise<Reader> {
     })
     return module
   })
+  // A failed download (e.g. offline before the first visit) is retried next time.
+  reader.catch(() => {
+    reader = null
+  })
   return reader
 }
 

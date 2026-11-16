@@ -12,7 +12,7 @@ import {
 import { isApiError } from '../api/client'
 import type { CardDto } from '../api/generated/CardDto'
 import { applyOp, nowSeconds } from './applyOp'
-import { type CardOp, type OutboxEntry, db, readMeta, writeMeta } from './db'
+import { type CardOp, type OutboxEntry, dataGeneration, db, readMeta, writeMeta } from './db'
 
 const BASE_RETRY_MS = 2_000
 /** Short cap: a missed `online` event must not leave changes waiting for long. */
@@ -20,6 +20,11 @@ const MAX_RETRY_MS = 60_000
 const POLL_INTERVAL_MS = 60_000
 /** Before the first pull; the server's cursor is never negative. */
 const NO_CURSOR = -1
+/** A change the server keeps failing on (5xx) is given up after this many tries. */
+export const MAX_SERVER_ATTEMPTS = 8
+
+/** Thrown when local data was wiped while a sync was running. */
+class StaleSyncError extends Error {}
 
 export interface SyncStatus {
   /** `false` when the browser reports no network or the last attempt could not reach the server. */
@@ -39,6 +44,9 @@ let running: Promise<void> | null = null
 let rerun = false
 let retryTimer: ReturnType<typeof setTimeout> | undefined
 let failures = 0
+/** Outbox entry being sent right now: it must not absorb newer edits. */
+let inFlightSeq: number | undefined
+let stopActive: (() => void) | null = null
 const listeners = new Set<() => void>()
 
 export function getSyncStatus(): SyncStatus {
@@ -57,6 +65,7 @@ function setStatus(patch: Partial<SyncStatus>): void {
 
 /** Starts background sync for a signed-in user; returns the stop function. */
 export function startSync(userId: string, onUnauthorized: () => void): () => void {
+  stopSync()
   session = { userId, onUnauthorized }
   const onOnline = () => {
     failures = 0
@@ -73,7 +82,7 @@ export function startSync(userId: string, onUnauthorized: () => void): () => voi
   setStatus({ online: navigator.onLine })
   void requestSync()
 
-  return () => {
+  const stop = () => {
     session = null
     clearTimeout(retryTimer)
     clearInterval(poll)
@@ -81,6 +90,14 @@ export function startSync(userId: string, onUnauthorized: () => void): () => voi
     window.removeEventListener('offline', onOffline)
     document.removeEventListener('visibilitychange', onVisible)
   }
+  stopActive = stop
+  return stop
+}
+
+/** Stops background sync (e.g. before signing out); safe to call twice. */
+export function stopSync(): void {
+  stopActive?.()
+  stopActive = null
 }
 
 /** Applies a change on this device right away and queues it for the server. */
@@ -98,7 +115,10 @@ export async function enqueue(cardId: string, op: CardOp): Promise<void> {
     if (op.type === 'save') {
       const queuedSave = await pending.filter((entry) => entry.op.type === 'save').first()
       // Only the latest content matters; keep the original position in the queue.
-      if (queuedSave?.seq !== undefined) return void (await db.outbox.update(queuedSave.seq, { op }))
+      // (Not into the entry being sent: it is deleted once the server answers.)
+      if (queuedSave?.seq !== undefined && queuedSave.seq !== inFlightSeq) {
+        return void (await db.outbox.update(queuedSave.seq, { op }))
+      }
     }
     await db.outbox.add({ cardId, op, attempts: 0 })
   })
@@ -126,9 +146,10 @@ export function requestSync(): Promise<void> {
 async function runOnce(): Promise<void> {
   clearTimeout(retryTimer)
   setStatus({ syncing: true })
+  const startedIn = dataGeneration()
   try {
     await flushOutbox()
-    await pull()
+    await pull(startedIn)
     failures = 0
     setStatus({ online: true, syncing: false, lastSyncedAt: Date.now() })
   } catch (error) {
@@ -138,6 +159,7 @@ async function runOnce(): Promise<void> {
 }
 
 function handleFailure(error: unknown): void {
+  if (error instanceof StaleSyncError) return
   if (isApiError(error, 401)) {
     session?.onUnauthorized()
     return
@@ -163,14 +185,22 @@ async function flushOutbox(): Promise<void> {
   for (;;) {
     const entry = await db.outbox.orderBy('seq').first()
     if (entry?.seq === undefined) return
+    inFlightSeq = entry.seq
     try {
       await send(entry)
     } catch (error) {
-      if (!isRefused(error)) {
+      if (isRefused(error)) {
+        await reportRefusal(entry, error)
+      } else if (isApiError(error) && error.status >= 500 && entry.attempts + 1 >= MAX_SERVER_ATTEMPTS) {
+        await reportProblem(entry, 'the server kept failing')
+      } else {
         await db.outbox.update(entry.seq, { attempts: entry.attempts + 1 })
         throw error
       }
-      await reportRefusal(entry, error)
+      // The server may now differ from what this device shows: pull a full snapshot.
+      await db.meta.delete('cursor')
+    } finally {
+      inFlightSeq = undefined
     }
     await db.outbox.delete(entry.seq)
   }
@@ -204,30 +234,37 @@ function isRefused(error: unknown): boolean {
 async function reportRefusal(entry: OutboxEntry, error: unknown): Promise<void> {
   // A card deleted elsewhere: changes to it no longer matter.
   if (isApiError(error, 404) || isApiError(error, 410)) return
-  const message = isApiError(error) ? error.message : 'unknown error'
+  await reportProblem(entry, isApiError(error) ? error.message : 'unknown error')
+}
+
+async function reportProblem(entry: OutboxEntry, reason: string): Promise<void> {
   const name = (await db.cards.get(entry.cardId))?.storeName ?? 'a card'
   const problems = (await readMeta('problems')) ?? []
-  await writeMeta('problems', [...problems, `Changes to ${name} could not be saved: ${message}`])
+  await writeMeta('problems', [...problems, `Changes to ${name} could not be saved: ${reason}`])
 }
 
 // ---------- pull ----------
 
-async function pull(): Promise<void> {
-  const since = (await readMeta('cursor')) ?? NO_CURSOR
+async function pull(startedIn: number): Promise<void> {
+  // A cursor belongs to the user it was fetched for.
+  const me = await readMeta('me')
+  const cursorIsMine = me !== undefined && me.user.id === session?.userId
+  const since = cursorIsMine ? ((await readMeta('cursor')) ?? NO_CURSOR) : NO_CURSOR
   const { cursor, cards } = await fetchChanges(since)
-  if (cards) await replaceCards(cards)
-  await writeMeta('cursor', cursor)
+  await db.transaction('rw', db.cards, db.outbox, db.meta, async () => {
+    if (dataGeneration() !== startedIn || !session) throw new StaleSyncError()
+    if (cards) await replaceCards(cards)
+    await writeMeta('cursor', cursor)
+  })
   if (cards) warmPhotoCache(cards)
 }
 
 /** Adopts the server's snapshot, keeping local versions of cards with unsent changes. */
 async function replaceCards(serverCards: readonly CardDto[]): Promise<void> {
-  await db.transaction('rw', db.cards, db.outbox, async () => {
-    const pending = new Set((await db.outbox.toArray()).map((entry) => entry.cardId))
-    const keep = (await db.cards.toArray()).filter((card) => pending.has(card.id))
-    await db.cards.clear()
-    await db.cards.bulkPut([...serverCards.filter((card) => !pending.has(card.id)), ...keep])
-  })
+  const pending = new Set((await db.outbox.toArray()).map((entry) => entry.cardId))
+  const keep = (await db.cards.toArray()).filter((card) => pending.has(card.id))
+  await db.cards.clear()
+  await db.cards.bulkPut([...serverCards.filter((card) => !pending.has(card.id)), ...keep])
 }
 
 /** Fetches photos through the service worker so they are cached before going offline. */
@@ -240,6 +277,8 @@ function warmPhotoCache(cards: readonly CardDto[]): void {
 /** Test hook: forget timers and state between tests. */
 export function resetSyncForTests(): void {
   clearTimeout(retryTimer)
+  stopActive = null
+  inFlightSeq = undefined
   session = null
   running = null
   rerun = false

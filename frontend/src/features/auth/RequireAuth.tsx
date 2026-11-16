@@ -1,5 +1,5 @@
 import { useQueryClient } from '@tanstack/react-query'
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { Navigate, Outlet } from 'react-router'
 import { rememberMe } from '../../offline/session'
 import { startSync } from '../../offline/syncEngine'
@@ -14,17 +14,29 @@ import { ME_QUERY_KEY, useMe } from './useMe'
 export function RequireAuth() {
   const me = useMe()
   const queryClient = useQueryClient()
-  const userId = me.data?.user.id
+  // The device's data is switched to this user (wiping another account's copy)
+  // before anything is shown or synced.
+  const [readyUserId, setReadyUserId] = useState<string | null>(null)
 
   useEffect(() => {
-    if (me.data) void rememberMe(me.data)
+    const user = me.data
+    if (!user) return
+    let active = true
+    rememberMe(user)
+      .catch((error: unknown) => console.error('Could not store the signed-in user on this device', error))
+      .finally(() => {
+        if (active) setReadyUserId(user.user.id)
+      })
+    return () => {
+      active = false
+    }
   }, [me.data])
 
   // Background sync runs while someone is signed in; a 401 re-checks the session.
   useEffect(() => {
-    if (!userId) return
-    return startSync(userId, () => void queryClient.invalidateQueries({ queryKey: ME_QUERY_KEY }))
-  }, [userId, queryClient])
+    if (!readyUserId) return
+    return startSync(readyUserId, () => void queryClient.invalidateQueries({ queryKey: ME_QUERY_KEY }))
+  }, [readyUserId, queryClient])
 
   if (me.isPending) return <FullPageSpinner />
   if (me.isError) {
@@ -36,5 +48,6 @@ export function RequireAuth() {
     )
   }
   if (!me.data) return <Navigate to="/login" replace />
+  if (readyUserId !== me.data.user.id) return <FullPageSpinner />
   return <Outlet />
 }

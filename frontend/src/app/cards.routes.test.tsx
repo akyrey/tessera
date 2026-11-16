@@ -84,6 +84,7 @@ describe('card list', () => {
   })
 
   it('shows the cards saved on the device when offline', async () => {
+    await writeMeta('me', owner)
     await db.cards.bulkPut([esselunga, coop])
     await writeMeta('cursor', 1)
     vi.mocked(cards.fetchChanges).mockRejectedValue(offline())
@@ -91,7 +92,7 @@ describe('card list', () => {
     renderRoute('/')
 
     expect(await screen.findByText(/Offline: showing the cards saved on this device/)).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: /Esselunga/ })).toBeInTheDocument()
+    expect(await screen.findByRole('link', { name: /Esselunga/ })).toBeInTheDocument()
   })
 
   it('keeps waiting for the first sync instead of claiming the wallet is empty', async () => {
@@ -104,6 +105,7 @@ describe('card list', () => {
   })
 
   it('reports changes the server refused until dismissed', async () => {
+    await writeMeta('me', owner)
     await writeMeta('problems', ['Changes to Coop could not be saved: store name is too long'])
 
     const { user } = renderRoute('/')
@@ -319,7 +321,10 @@ describe('edit card', () => {
 
 describe('sharing', () => {
   it('lets the owner share a card with the household', async () => {
-    vi.mocked(cards.setSharing).mockResolvedValue({ ...esselunga, shared: true })
+    vi.mocked(cards.setSharing).mockImplementation(async () => {
+      serverHas({ ...esselunga, shared: true })
+      return { ...esselunga, shared: true }
+    })
 
     const { user, router } = renderRoute('/cards/c-esse/edit')
     const toggle = await screen.findByRole('switch', { name: /Share with Home/ })

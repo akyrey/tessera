@@ -34,7 +34,13 @@ export function CameraScanner({ onResult, onClose }: CameraScannerProps) {
         canvas.width = element.videoWidth
         canvas.height = element.videoHeight
         context.drawImage(element, 0, 0)
-        const result = await scanImage(context.getImageData(0, 0, canvas.width, canvas.height), false)
+        let result: ScanResult
+        try {
+          result = await scanImage(context.getImageData(0, 0, canvas.width, canvas.height), false)
+        } catch {
+          if (!stopped) setError('The scanner could not start. Enter the number by hand instead.')
+          return
+        }
         if (stopped) return
         if (result.status !== 'none') return done.current(result)
       }
@@ -43,12 +49,14 @@ export function CameraScanner({ onResult, onClose }: CameraScannerProps) {
 
     const start = async () => {
       if (!navigator.mediaDevices?.getUserMedia) throw new Error('unsupported')
-      stream = await navigator.mediaDevices.getUserMedia({
+      const granted = await navigator.mediaDevices.getUserMedia({
         video: { facingMode: 'environment' },
         audio: false,
       })
-      if (stopped || !video.current) return
-      video.current.srcObject = stream
+      stream = granted
+      // Closed while the permission prompt was open: release the camera at once.
+      if (stopped || !video.current) return granted.getTracks().forEach((track) => track.stop())
+      video.current.srcObject = granted
       await video.current.play()
       void scanFrame()
     }

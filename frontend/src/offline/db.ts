@@ -77,12 +77,22 @@ export async function writeMeta<K extends keyof MetaEntries>(key: K, value: Meta
   await db.meta.put({ key, value } as MetaRow)
 }
 
+let generation = 0
+
+/** Bumped by every wipe: sync work started before it must not write afterwards. */
+export function dataGeneration(): number {
+  return generation
+}
+
 /** Removes every trace of the signed-in user from this device. */
 export async function clearLocalData(): Promise<void> {
+  generation += 1
   await db.transaction('rw', db.cards, db.outbox, db.meta, async () => {
     await Promise.all([db.cards.clear(), db.outbox.clear(), db.meta.clear()])
   })
   if ('caches' in globalThis) await caches.delete(PHOTO_CACHE).catch(() => false)
+  // Workbox's expiration bookkeeping lists the cached photo URLs.
+  globalThis.indexedDB?.deleteDatabase('workbox-expiration')
 }
 
 /** Service worker cache for `/api/images/*` (see vite.config.ts). */
