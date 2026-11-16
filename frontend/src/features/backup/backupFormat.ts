@@ -28,9 +28,15 @@ export const backupCardSchema = z.object({
   cardNumber: z.string().min(1).max(512),
   barcodeFormat: barcodeFormatSchema,
   memberName: z.string().max(64).nullable(),
-  color: z.string().regex(/^#[0-9a-fA-F]{6}$/).nullable(),
+  color: z
+    .string()
+    .regex(/^#[0-9a-fA-F]{6}$/)
+    .nullable(),
   notes: z.string().max(1000).nullable(),
-  expiresOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable(),
+  expiresOn: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .nullable(),
   isFavorite: z.boolean(),
   /** For reference only: brands are linked again from the card form. */
   brandName: z.string().nullable(),

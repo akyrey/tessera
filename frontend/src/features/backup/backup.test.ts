@@ -84,11 +84,13 @@ describe('readBackup', () => {
     ['an expiry that is not a date', { expiresOn: 'tomorrow' }],
     ['a place outside the map', { places: [{ label: 'Forno', lat: 91, lon: 9 }] }],
     ['a place with a long name', { places: [{ label: 'x'.repeat(65), lat: 45, lon: 9 }] }],
-    ['a photo larger than the server accepts', { photos: { front: `data:image/png;base64,${'A'.repeat(700_000)}` } }],
+    [
+      'a photo larger than the server accepts',
+      { photos: { front: `data:image/png;base64,${'A'.repeat(700_000)}` } },
+    ],
   ])('rejects %s', async (_, overrides) => {
     await expect(readBackup(file(backupOf(entry(overrides))))).rejects.toThrow('not a valid')
   })
-
 
   it('rejects files that are not Tessera backups', async () => {
     await expect(readBackup(file('not json'))).rejects.toThrow('not JSON')
