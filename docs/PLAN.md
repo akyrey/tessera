@@ -111,6 +111,7 @@ The sync cursor is the last `change_seq` the client has seen.
 | `GET /api/changes?since=` | Pull sync: cursor + full snapshot of visible cards, or `null` when unchanged |
 | `GET /api/cards` | Cards visible to me, with my favourite/usage and photo ids (M2; superseded by `/api/changes` for offline use in M3) |
 | `PUT /api/cards/{id}` · `DELETE /api/cards/{id}` | Idempotent upsert (client-chosen UUIDv7) / soft delete leaving a tombstone |
+| `PUT /api/cards/{id}/places` | Replace the hand-marked shops only |
 | `PUT /api/cards/{id}/sharing` | Share with / unshare from the owner's household (owner only) |
 | `PUT /api/cards/{id}/prefs` · `POST /api/cards/{id}/use` | Per-user favourite; usage bump for "recently used" |
 | `PUT/DELETE /api/cards/{id}/images/{front\|back}` · `GET /api/images/{id}` | Raw-body photo upload (≤ 512 KB, type checked against magic bytes), authorized download |
@@ -295,6 +296,14 @@ Each milestone is test-first and ends with something usable on a phone.
   Tests use a fake Wikidata/Overpass (axum on a random port); E2E points both at an unreachable local port.
   E2E: a hand-marked shop brings its card to the top there and not elsewhere (Chromium); nearby by brand on both
   engines with a stubbed API and a mocked position.
+  Security review follow-ups (done): linking a brand no longer fetches anything; the first Overpass fetch starts
+  when a card uses the brand (deduplicated while queued) and the brand table is capped at 1000; an Overpass `remark`
+  (partial result) or an empty answer keeps the stored shops; responses are size-capped (1 MB Wikidata, 32 MB
+  Overpass, `[maxsize]` in the query) and redirects are not followed; inserts are batched; stored Wikidata ids are
+  re-validated before building a query; brand search lists only brands on the caller's visible cards; places have
+  their own `PUT /api/cards/{id}/places` (card saves without `places` keep them, so a places edit never overwrites
+  other fields); a failing `/api/locations` no longer fails the card sync. Open: Wikidata items are not checked to
+  be brands (an unrelated item just finds no shops); `/api/locations` can reach a few MB for many large chains.
 
 
 ### M6 — Polish / later

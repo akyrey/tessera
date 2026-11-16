@@ -6,6 +6,8 @@ use serde_json::Value;
 pub const QUERY_TIMEOUT_SECS: u32 = 90;
 /// Even the largest Italian chains have a few thousand shops.
 pub const MAX_LOCATIONS: usize = 10_000;
+/// Overpass memory budget for the query (bytes); far above any real brand.
+const QUERY_MAX_SIZE: u32 = 64 * 1024 * 1024;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct StoreLocation {
@@ -22,7 +24,7 @@ pub struct StoreLocation {
 /// `qid` and `region` must be validated by the caller (`Q123…`, `IT`).
 pub fn query(qid: &str, region: &str) -> String {
     format!(
-        "[out:json][timeout:{QUERY_TIMEOUT_SECS}];\n\
+        "[out:json][timeout:{QUERY_TIMEOUT_SECS}][maxsize:{QUERY_MAX_SIZE}];\n\
          area[\"ISO3166-1\"=\"{region}\"][admin_level=2]->.region;\n\
          nwr[\"brand:wikidata\"=\"{qid}\"](area.region);\n\
          out center tags;"

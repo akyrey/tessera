@@ -155,8 +155,8 @@ describe('marking shops by hand', () => {
   it('remembers the current location for the card and can remove it', async () => {
     stubLocation('prompt', DUOMO as GeolocationCoordinates)
     // A server that remembers saves, so the next pull agrees with the device.
-    vi.mocked(cards.saveCard).mockImplementation(async (_id, input) => {
-      const saved = { ...coop, places: input.places ?? [] }
+    vi.mocked(cards.setPlaces).mockImplementation(async (_id, places) => {
+      const saved = { ...coop, places: [...places] }
       serverHas(esselunga, forno, saved)
       return saved
     })
@@ -166,11 +166,9 @@ describe('marking shops by hand', () => {
 
     expect(await screen.findByText('Coop · 45.4642, 9.1900')).toBeInTheDocument()
     await waitFor(() =>
-      expect(cards.saveCard).toHaveBeenCalledWith(
-        'c-coop',
-        expect.objectContaining({ places: [{ label: 'Coop', lat: 45.4642, lon: 9.19 }] }),
-      ),
+      expect(cards.setPlaces).toHaveBeenCalledWith('c-coop', [{ label: 'Coop', lat: 45.4642, lon: 9.19 }]),
     )
+    expect(cards.saveCard).not.toHaveBeenCalled()
     await user.click(screen.getByRole('button', { name: 'Remove location 1' }))
     await waitFor(() => expect(screen.queryByText(/Coop · /)).not.toBeInTheDocument())
   })

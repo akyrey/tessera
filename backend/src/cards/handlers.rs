@@ -11,10 +11,12 @@ use uuid::Uuid;
 
 use super::images::{self, MAX_IMAGE_BYTES};
 use super::model::{
-    CardDto, CardInput, CardPrefsInput, CardSharingInput, ChangesDto, ImageCreated, ImageKind,
+    CardDto, CardInput, CardPlacesInput, CardPrefsInput, CardSharingInput, ChangesDto,
+    ImageCreated, ImageKind,
 };
 use super::service;
 use crate::accounts::sessions::CurrentUser;
+use crate::brands;
 use crate::clock::now_unix;
 use crate::error::{ApiError, ApiJson, ApiPath};
 use crate::state::AppState;
@@ -36,6 +38,7 @@ pub fn routes() -> Router<AppState> {
         .route("/cards/{id}", put(put_card).delete(delete_card))
         .route("/cards/{id}/prefs", put(put_prefs))
         .route("/cards/{id}/sharing", put(put_sharing))
+        .route("/cards/{id}/places", put(put_places))
         .route("/cards/{id}/use", post(record_use))
         .route("/images/{id}", get(get_image))
         .merge(photos)
@@ -71,9 +74,11 @@ async fn put_card(
     ApiPath(id): ApiPath<Uuid>,
     ApiJson(input): ApiJson<CardInput>,
 ) -> Result<Json<CardDto>, ApiError> {
-    service::put_card(&state.db, user.0.id, id, input, now_unix())
-        .await
-        .map(Json)
+    let card = service::put_card(&state.db, user.0.id, id, input, now_unix()).await?;
+    if let Some(brand_id) = card.brand_id {
+        brands::refresh::fetch_if_new(&state, brand_id).await;
+    }
+    Ok(Json(card))
 }
 
 async fn delete_card(
@@ -92,6 +97,17 @@ async fn put_prefs(
     ApiJson(input): ApiJson<CardPrefsInput>,
 ) -> Result<Json<CardDto>, ApiError> {
     service::set_favorite(&state.db, user.0.id, id, input.is_favorite)
+        .await
+        .map(Json)
+}
+
+async fn put_places(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    ApiPath(id): ApiPath<Uuid>,
+    ApiJson(input): ApiJson<CardPlacesInput>,
+) -> Result<Json<CardDto>, ApiError> {
+    service::set_places(&state.db, user.0.id, id, input.places, now_unix())
         .await
         .map(Json)
 }

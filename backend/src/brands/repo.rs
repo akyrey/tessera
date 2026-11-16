@@ -30,18 +30,53 @@ pub async fn find(ex: impl SqliteExecutor<'_>, id: Uuid) -> sqlx::Result<Option<
         .await
 }
 
-/// Known brands whose name contains `query` (case-insensitive for ASCII).
+/// Brands on cards the user can see whose name contains `query`
+/// (case-insensitive for ASCII). Other households' brands stay private.
 pub async fn search(
     ex: impl SqliteExecutor<'_>,
+    user_id: Uuid,
+    household_id: Option<Uuid>,
     query: &str,
     limit: u32,
 ) -> sqlx::Result<Vec<BrandDto>> {
     let pattern = format!("%{}%", escape_like(query));
-    let sql = format!("{BRAND_SELECT} WHERE b.name LIKE ? ESCAPE '\\' ORDER BY b.name LIMIT ?");
+    let sql = format!(
+        "{BRAND_SELECT}
+         WHERE b.name LIKE ?1 ESCAPE '\\'
+           AND EXISTS (SELECT 1 FROM cards c WHERE c.brand_id = b.id AND c.deleted_at IS NULL
+                       AND (c.owner_id = ?2 OR c.household_id = ?3))
+         ORDER BY b.name LIMIT ?4"
+    );
     sqlx::query_as(sqlx::AssertSqlSafe(sql))
         .bind(pattern)
+        .bind(user_id)
+        .bind(household_id)
         .bind(limit)
         .fetch_all(ex)
+        .await
+}
+
+pub async fn count(ex: impl SqliteExecutor<'_>) -> sqlx::Result<i64> {
+    sqlx::query_scalar("SELECT COUNT(*) FROM brands")
+        .fetch_one(ex)
+        .await
+}
+
+pub async fn count_locations(ex: impl SqliteExecutor<'_>, brand_id: Uuid) -> sqlx::Result<i64> {
+    sqlx::query_scalar("SELECT COUNT(*) FROM store_locations WHERE brand_id = ?")
+        .bind(brand_id)
+        .fetch_one(ex)
+        .await
+}
+
+/// Wikidata id and last sync of a brand.
+pub async fn sync_state(
+    ex: impl SqliteExecutor<'_>,
+    brand_id: Uuid,
+) -> sqlx::Result<Option<(String, Option<i64>)>> {
+    sqlx::query_as("SELECT wikidata_id, last_synced_at FROM brands WHERE id = ?")
+        .bind(brand_id)
+        .fetch_optional(ex)
         .await
 }
 
@@ -109,24 +144,29 @@ pub async fn delete_locations(ex: impl SqliteExecutor<'_>, brand_id: Uuid) -> sq
         .map(|_| ())
 }
 
-pub async fn insert_location(
-    ex: impl SqliteExecutor<'_>,
+/// Rows per INSERT: keeps statements well under SQLite's parameter limit.
+const INSERT_BATCH: usize = 500;
+
+pub async fn insert_locations(
+    conn: &mut sqlx::SqliteConnection,
     brand_id: Uuid,
-    location: &StoreLocation,
+    locations: &[StoreLocation],
 ) -> sqlx::Result<()> {
-    sqlx::query(
-        "INSERT OR REPLACE INTO store_locations (brand_id, osm_type, osm_id, lat, lon, name)
-         VALUES (?, ?, ?, ?, ?, ?)",
-    )
-    .bind(brand_id)
-    .bind(location.osm_type)
-    .bind(location.osm_id)
-    .bind(location.lat)
-    .bind(location.lon)
-    .bind(&location.name)
-    .execute(ex)
-    .await
-    .map(|_| ())
+    for batch in locations.chunks(INSERT_BATCH) {
+        let mut builder = sqlx::QueryBuilder::new(
+            "INSERT OR REPLACE INTO store_locations (brand_id, osm_type, osm_id, lat, lon, name) ",
+        );
+        builder.push_values(batch, |mut row, location| {
+            row.push_bind(brand_id)
+                .push_bind(location.osm_type)
+                .push_bind(location.osm_id)
+                .push_bind(location.lat)
+                .push_bind(location.lon)
+                .push_bind(location.name.clone());
+        });
+        builder.build().execute(&mut *conn).await?;
+    }
+    Ok(())
 }
 
 pub async fn mark_synced(

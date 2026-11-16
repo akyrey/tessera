@@ -15,7 +15,7 @@ color?: string, notes?: string,
  */
 brandId?: string, 
 /**
- * Shops marked by hand; replaces the stored list.
+ * Shops marked by hand; replaces the stored list when present, keeps it when absent.
  */
 places?: Array<Place>, 
 /**

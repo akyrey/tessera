@@ -5,6 +5,7 @@ import type { CardInput } from './generated/CardInput'
 import type { ChangesDto } from './generated/ChangesDto'
 import type { ImageCreated } from './generated/ImageCreated'
 import type { ImageKind } from './generated/ImageKind'
+import type { Place } from './generated/Place'
 import { cardSchema, changesSchema, imageCreatedSchema } from './schemas'
 
 const cardPath = (id: string) => `/api/cards/${encodeURIComponent(id)}`
@@ -34,6 +35,11 @@ export function setFavorite(id: string, isFavorite: boolean): Promise<CardDto> {
 /** Shares the card with the owner's household, or makes it private (owner only). */
 export function setSharing(id: string, shared: boolean): Promise<CardDto> {
   return putJson(`${cardPath(id)}/sharing`, cardSchema, { shared })
+}
+
+/** Replaces the hand-marked shops of a card (nothing else). */
+export function setPlaces(id: string, places: readonly Place[]): Promise<CardDto> {
+  return putJson(`${cardPath(id)}/places`, cardSchema, { places })
 }
 
 /** Counts an opening of the card, for "recently used". */

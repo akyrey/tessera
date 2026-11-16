@@ -133,7 +133,9 @@ pub async fn put_card(
         }
         Some(_) => return Err(ApiError::NotFound),
     }
-    repo::replace_places(&mut tx, id, &fields.places).await?;
+    if let Some(places) = &fields.places {
+        repo::replace_places(&mut tx, id, places).await?;
+    }
     let card = load_dto(&mut tx, viewer, id).await?;
     tx.commit().await?;
     Ok(card)
@@ -182,6 +184,26 @@ pub async fn set_favorite(
     let viewer = viewer_in(&mut tx, user_id).await?;
     require_visible(&mut tx, viewer, id).await?;
     repo::set_favorite(&mut *tx, id, viewer.user_id, is_favorite, seq).await?;
+    let card = load_dto(&mut tx, viewer, id).await?;
+    tx.commit().await?;
+    Ok(card)
+}
+
+/// Replaces the hand-marked shops only, so it never overwrites other edits.
+pub async fn set_places(
+    pool: &SqlitePool,
+    user_id: Uuid,
+    id: Uuid,
+    places: Vec<Place>,
+    now: i64,
+) -> Result<CardDto, ApiError> {
+    let places = validate_places(places)?;
+    let mut tx = pool.begin().await?;
+    let seq = repo::next_change_seq(&mut *tx).await?;
+    let viewer = viewer_in(&mut tx, user_id).await?;
+    require_editable(&mut tx, viewer, id).await?;
+    repo::replace_places(&mut tx, id, &places).await?;
+    repo::touch_card(&mut *tx, id, now, seq).await?;
     let card = load_dto(&mut tx, viewer, id).await?;
     tx.commit().await?;
     Ok(card)
@@ -366,7 +388,7 @@ pub fn validate(input: CardInput) -> Result<CardFields, ApiError> {
         color: input.color.map(|c| validate_color(&c)).transpose()?,
         notes: optional_multiline("notes", input.notes, MAX_NOTES_CHARS)?,
         brand_id: input.brand_id,
-        places: validate_places(input.places.unwrap_or_default())?,
+        places: input.places.map(validate_places).transpose()?,
         expires_on: input
             .expires_on
             .as_deref()
@@ -525,7 +547,7 @@ mod tests {
         assert_eq!(fields.member_name, None);
         assert_eq!(fields.color.as_deref(), Some("#aabbcc"));
         assert_eq!(fields.notes.as_deref(), Some("line 1\nline 2"));
-        assert_eq!(fields.places[0].label, "Via Roma");
+        assert_eq!(fields.places.as_ref().unwrap()[0].label, "Via Roma");
         assert_eq!(fields.expires_on.as_deref(), Some("2028-02-29"));
     }
 

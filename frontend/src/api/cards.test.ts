@@ -9,6 +9,7 @@ import {
   recordUse,
   saveCard,
   setFavorite,
+  setPlaces,
   setSharing,
   uploadImage,
 } from './cards'
@@ -64,6 +65,10 @@ describe('cards api', () => {
 
     respond(card({ isFavorite: true }))
     await expect(setFavorite('c1', true)).resolves.toMatchObject({ isFavorite: true })
+
+    const places = respond(card())
+    await setPlaces('c1', [{ label: 'Forno', lat: 45, lon: 9 }])
+    expect(lastCall(places)).toMatchObject({ path: '/api/cards/c1/places', method: 'PUT' })
 
     const sharing = respond(card({ shared: true }))
     await expect(setSharing('c1', true)).resolves.toMatchObject({ shared: true })

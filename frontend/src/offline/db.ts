@@ -2,6 +2,7 @@ import Dexie, { type EntityTable } from 'dexie'
 import type { CardDto } from '../api/generated/CardDto'
 import type { CardInput } from '../api/generated/CardInput'
 import type { ImageKind } from '../api/generated/ImageKind'
+import type { Place } from '../api/generated/Place'
 import type { Me } from '../api/generated/Me'
 
 /** A card as stored on the device: the server's view plus edits not yet synced. */
@@ -21,6 +22,7 @@ export type CardOp =
   | { readonly type: 'delete' }
   | { readonly type: 'favorite'; readonly isFavorite: boolean }
   | { readonly type: 'share'; readonly shared: boolean }
+  | { readonly type: 'places'; readonly places: readonly Place[] }
   | { readonly type: 'use'; readonly at: number }
   | {
       readonly type: 'photo'

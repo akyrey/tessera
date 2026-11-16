@@ -8,7 +8,7 @@ use axum::{Json, Router, middleware};
 use serde::Deserialize;
 
 use super::model::{BrandDto, BrandSearchDto, LinkBrandInput, LocationsDto};
-use super::{refresh, service};
+use super::service;
 use crate::accounts::sessions::CurrentUser;
 use crate::clock::now_unix;
 use crate::error::{ApiError, ApiJson};
@@ -36,11 +36,11 @@ struct SearchQuery {
 
 async fn search(
     State(state): State<AppState>,
-    _user: CurrentUser,
+    user: CurrentUser,
     query: Result<Query<SearchQuery>, QueryRejection>,
 ) -> Result<Json<BrandSearchDto>, ApiError> {
     let Query(query) = query.map_err(|e| ApiError::Validation(e.body_text()))?;
-    service::search(&state.db, &state.upstream, &query.q)
+    service::search(&state.db, &state.upstream, user.0.id, &query.q)
         .await
         .map(Json)
 }
@@ -57,9 +57,7 @@ async fn link(
         now_unix(),
     )
     .await?;
-    if created {
-        refresh::refresh_soon(&state, brand.id, brand.wikidata_id.clone());
-    }
+    // Shops are fetched once a card actually uses the brand (see the card handlers).
     let status = if created {
         StatusCode::CREATED
     } else {

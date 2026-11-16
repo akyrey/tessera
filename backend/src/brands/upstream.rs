@@ -1,10 +1,12 @@
 //! HTTP access to Wikidata and Overpass: shared client, timeouts, politeness.
 
+use std::collections::HashSet;
 use std::time::{Duration, Instant};
 
 use serde_json::Value;
 use tokio::sync::Mutex;
 use url::Url;
+use uuid::Uuid;
 
 use super::overpass::{self, StoreLocation};
 use super::wikidata::{self, BrandCandidate};
@@ -20,6 +22,10 @@ const WIKIDATA_TIMEOUT: Duration = Duration::from_secs(10);
 const OVERPASS_TIMEOUT: Duration = Duration::from_secs(overpass::QUERY_TIMEOUT_SECS as u64 + 30);
 /// Overpass asks clients not to hammer it; one query at a time, spaced out.
 const OVERPASS_MIN_GAP: Duration = Duration::from_secs(5);
+/// Wikidata answers are a few KB; anything bigger is not what we asked for.
+const MAX_WIKIDATA_BYTES: usize = 1024 * 1024;
+/// A country-wide brand is a few MB of JSON at most.
+const MAX_OVERPASS_BYTES: usize = 32 * 1024 * 1024;
 /// Labels and search results in the users' language.
 pub const LANGUAGE: &str = "it";
 
@@ -38,6 +44,8 @@ pub struct Upstream {
     region: String,
     /// When the last Overpass query finished; also serialises queries.
     overpass_gate: Mutex<Option<Instant>>,
+    /// Brands with a first fetch queued or running, so it is not queued twice.
+    pending_first_fetch: std::sync::Mutex<HashSet<Uuid>>,
 }
 
 impl Upstream {
@@ -46,6 +54,8 @@ impl Upstream {
         let _ = rustls::crypto::ring::default_provider().install_default();
         let http = reqwest::Client::builder()
             .user_agent(USER_AGENT)
+            // The endpoints are fixed in config; never let a response send us elsewhere.
+            .redirect(reqwest::redirect::Policy::none())
             .connect_timeout(Duration::from_secs(10))
             .build()?;
         Ok(Self {
@@ -54,7 +64,22 @@ impl Upstream {
             wikidata_url: config.wikidata_url.clone(),
             region: config.region_iso3166.clone(),
             overpass_gate: Mutex::new(None),
+            pending_first_fetch: std::sync::Mutex::new(HashSet::new()),
         })
+    }
+
+    /// Claims the first fetch of `brand_id`; `false` if one is already queued.
+    pub fn claim_first_fetch(&self, brand_id: Uuid) -> bool {
+        self.pending_first_fetch
+            .lock()
+            .map(|mut pending| pending.insert(brand_id))
+            .unwrap_or(false)
+    }
+
+    pub fn release_first_fetch(&self, brand_id: Uuid) {
+        if let Ok(mut pending) = self.pending_first_fetch.lock() {
+            pending.remove(&brand_id);
+        }
     }
 
     pub async fn search_brands(&self, query: &str) -> Result<Vec<BrandCandidate>, UpstreamError> {
@@ -83,7 +108,7 @@ impl Upstream {
             .send()
             .await?
             .error_for_status()?;
-        Ok(response.json().await?)
+        read_json(response, MAX_WIKIDATA_BYTES).await
     }
 
     /// Every location of the brand in the configured country.
@@ -115,11 +140,33 @@ impl Upstream {
             .send()
             .await?
             .error_for_status()?;
-        let body: Value = response.json().await?;
-        if body.get("elements").is_none() {
-            let remark = body["remark"].as_str().unwrap_or("no elements in response");
+        let body = read_json(response, MAX_OVERPASS_BYTES).await?;
+        // A `remark` means the query was cut short (timeout, memory): the list is partial.
+        if let Some(remark) = body["remark"].as_str() {
             return Err(UpstreamError::Response(remark.to_owned()));
+        }
+        if body.get("elements").is_none() {
+            return Err(UpstreamError::Response("no elements in response".into()));
         }
         Ok(overpass::parse(&body))
     }
+}
+
+/// Reads at most `limit` bytes of JSON, failing instead of buffering more.
+async fn read_json(mut response: reqwest::Response, limit: usize) -> Result<Value, UpstreamError> {
+    let too_large = || UpstreamError::Response(format!("response larger than {limit} bytes"));
+    if response
+        .content_length()
+        .is_some_and(|length| length > limit as u64)
+    {
+        return Err(too_large());
+    }
+    let mut body = Vec::new();
+    while let Some(chunk) = response.chunk().await? {
+        if body.len() + chunk.len() > limit {
+            return Err(too_large());
+        }
+        body.extend_from_slice(&chunk);
+    }
+    serde_json::from_slice(&body).map_err(|e| UpstreamError::Response(e.to_string()))
 }

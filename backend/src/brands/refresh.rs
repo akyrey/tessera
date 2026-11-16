@@ -42,11 +42,19 @@ pub async fn refresh_due(state: &AppState, now: i64) -> sqlx::Result<usize> {
     Ok(refreshed)
 }
 
-/// Fetches a newly linked brand's shops right away, without blocking the request.
-pub fn refresh_soon(state: &AppState, brand_id: Uuid, qid: String) {
+/// Fetches the shops of a brand that has never been fetched, right after a card
+/// starts using it. At most one such fetch per brand is queued at a time.
+pub async fn fetch_if_new(state: &AppState, brand_id: Uuid) {
+    let Ok(Some((qid, None))) = repo::sync_state(&state.db, brand_id).await else {
+        return;
+    };
+    if !state.upstream.claim_first_fetch(brand_id) {
+        return;
+    }
     let state = state.clone();
     tokio::spawn(async move {
         let _ = service::refresh_locations(&state.db, &state.upstream, brand_id, &qid, now_unix())
             .await;
+        state.upstream.release_first_fetch(brand_id);
     });
 }

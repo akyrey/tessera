@@ -77,8 +77,7 @@ function CardForm({ id, existing }: CardFormProps) {
       notes: notes.trim() || undefined,
       brandId: brand?.id,
       expiresOn: expiresOn || undefined,
-      // Hand-marked shops are managed from the card view and kept as they are.
-      places: existing?.places ?? [],
+      // Hand-marked shops are left out: they have their own op (card view).
     }
     try {
       // Saved on the device at once; the outbox sends it when there is network.

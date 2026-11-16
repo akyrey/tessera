@@ -19,7 +19,12 @@ export function applyOp(card: LocalCard | undefined, op: CardOp, context: OpCont
   switch (op.type) {
     case 'save':
       return card
-        ? { ...card, ...fieldsOf(op.input, op.brandName), updatedAt: context.now }
+        ? {
+            ...card,
+            ...fieldsOf(op.input, op.brandName),
+            places: op.input.places ?? card.places,
+            updatedAt: context.now,
+          }
         : newCard(context, op.input, op.brandName)
     case 'delete':
       return undefined
@@ -27,6 +32,8 @@ export function applyOp(card: LocalCard | undefined, op: CardOp, context: OpCont
       return card && { ...card, isFavorite: op.isFavorite }
     case 'share':
       return card && { ...card, shared: op.shared }
+    case 'places':
+      return card && { ...card, places: [...op.places] }
     case 'use':
       return card && { ...card, useCount: card.useCount + 1, lastUsedAt: op.at }
     case 'photo':

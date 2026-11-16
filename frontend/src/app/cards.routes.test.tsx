@@ -210,7 +210,7 @@ describe('new card', () => {
       color: '#1d4ed8',
       notes: undefined,
       brandId: undefined,
-      places: [],
+      expiresOn: undefined,
     })
     expect(router.state.location.pathname).toBe(`/cards/${id}`)
   })
@@ -395,6 +395,11 @@ describe('expiry', () => {
   })
 
   it('saves an expiry date from the form', async () => {
+    vi.mocked(cards.saveCard).mockImplementation(async (id, input) => {
+      const saved = { ...esselunga, id, expiresOn: input.expiresOn ?? null }
+      serverHas(saved, coop, decathlon)
+      return saved
+    })
     const { user } = renderRoute('/cards/c-esse/edit')
     await user.type(await screen.findByLabelText('Expires on (optional)'), '2030-01-31')
     await user.click(screen.getByRole('button', { name: 'Save card' }))

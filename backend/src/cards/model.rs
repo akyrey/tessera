@@ -44,7 +44,8 @@ pub struct CardFields {
     pub color: Option<String>,
     pub notes: Option<String>,
     pub brand_id: Option<Uuid>,
-    pub places: Vec<Place>,
+    /// `None` keeps the stored places (they have their own endpoint).
+    pub places: Option<Vec<Place>>,
     pub expires_on: Option<String>,
 }
 
@@ -68,12 +69,20 @@ pub struct CardInput {
     /// Store brand, for finding nearby shops.
     #[ts(optional)]
     pub brand_id: Option<Uuid>,
-    /// Shops marked by hand; replaces the stored list.
+    /// Shops marked by hand; replaces the stored list when present, keeps it when absent.
     #[ts(optional)]
     pub places: Option<Vec<Place>>,
     /// Last valid day (`YYYY-MM-DD`), for coupons and vouchers.
     #[ts(optional)]
     pub expires_on: Option<String>,
+}
+
+/// Body of `PUT /api/cards/{id}/places`.
+#[derive(Debug, Clone, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[ts(export)]
+pub struct CardPlacesInput {
+    pub places: Vec<Place>,
 }
 
 /// Body of `PUT /api/cards/{id}/sharing`.

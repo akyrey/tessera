@@ -6,6 +6,7 @@ import {
   recordUse,
   saveCard,
   setFavorite,
+  setPlaces,
   setSharing,
   uploadImage,
 } from '../api/cards'
@@ -217,6 +218,8 @@ function send({ cardId, op }: OutboxEntry): Promise<unknown> {
       return setFavorite(cardId, op.isFavorite)
     case 'share':
       return setSharing(cardId, op.shared)
+    case 'places':
+      return setPlaces(cardId, op.places)
     case 'use':
       return recordUse(cardId)
     case 'photo':
@@ -258,7 +261,11 @@ async function pull(startedIn: number): Promise<void> {
     await writeMeta('cursor', cursor)
   })
   if (cards) warmPhotoCache(cards)
-  await pullLocations(startedIn)
+  await pullLocations(startedIn).catch((error: unknown) => {
+    // Cards are what matters at the till; stale shop locations are fine until next time.
+    if (error instanceof StaleSyncError || isApiError(error, 401)) throw error
+    console.warn('Shop locations could not be refreshed', error)
+  })
 }
 
 /** Shop locations of linked brands, for "nearby" (only when they changed). */

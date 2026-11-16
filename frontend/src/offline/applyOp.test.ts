@@ -40,11 +40,9 @@ describe('applyOp', () => {
       context,
     )
     expect(saved).toMatchObject({ brandId: 'b1', brandName: 'Coop', places: [place] })
-    expect(applyOp(saved, { type: 'save', input }, context)).toMatchObject({
-      brandId: null,
-      brandName: null,
-      places: [],
-    })
+    // A save without places keeps them; places have their own op.
+    expect(applyOp(saved, { type: 'save', input }, context)).toMatchObject({ brandId: null, places: [place] })
+    expect(applyOp(saved, { type: 'places', places: [] }, context)?.places).toEqual([])
   })
 
   it('handles deletion, favourites, usage and photos', () => {

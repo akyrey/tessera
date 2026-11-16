@@ -20,6 +20,8 @@ use uuid::Uuid;
 struct Upstream {
     overpass_calls: Arc<AtomicUsize>,
     overpass_down: bool,
+    /// Answer like an overloaded server: 200 with a remark, or no shops at all.
+    overpass_reply: Option<Value>,
 }
 
 async fn wikidata(Query(params): Query<HashMap<String, String>>) -> Json<Value> {
@@ -46,6 +48,9 @@ async fn overpass(State(upstream): State<Upstream>, body: String) -> (StatusCode
     assert!(body.contains("brand%3Awikidata"), "{body}");
     if upstream.overpass_down {
         return (StatusCode::GATEWAY_TIMEOUT, Json(json!({})));
+    }
+    if let Some(reply) = upstream.overpass_reply {
+        return (StatusCode::OK, Json(reply));
     }
     (
         StatusCode::OK,
@@ -77,7 +82,8 @@ async fn link(app: &TestApp, session: &str, qid: &str) -> axum::response::Respon
 async fn search_combines_linked_brands_and_wikidata_candidates() {
     let app = spawn(Upstream::default()).await;
     let (_, session) = app.bootstrap_admin("Alice").await;
-    link(&app, &session, "Q1059636").await;
+    let brand = json(link(&app, &session, "Q1059636").await).await;
+    card_with_brand(&app, &session, &brand["id"]).await;
 
     let response = app.get("/api/brands/search?q=Ess", Some(&session)).await;
 
@@ -265,6 +271,11 @@ async fn refresh_job_fetches_due_brands_once_and_backs_off_after_errors() {
     let failing = spawn(down.clone()).await;
     let (_, session) = failing.bootstrap_admin("Alice").await;
     let brand = json(link(&failing, &session, "Q1059636").await).await;
+    assert_eq!(
+        down.overpass_calls.load(Ordering::SeqCst),
+        0,
+        "linking alone fetches nothing"
+    );
     card_with_brand(&failing, &session, &brand["id"]).await;
     tokio::time::sleep(std::time::Duration::from_millis(300)).await;
     let after_first_failure = down.overpass_calls.load(Ordering::SeqCst);
@@ -278,4 +289,124 @@ async fn refresh_job_fetches_due_brands_once_and_backs_off_after_errors() {
         down.overpass_calls.load(Ordering::SeqCst),
         after_first_failure
     );
+}
+
+#[tokio::test]
+async fn partial_or_empty_overpass_answers_keep_the_stored_shops() {
+    let app = spawn(Upstream::default()).await;
+    let (_, session) = app.bootstrap_admin("Alice").await;
+    let brand = json(link(&app, &session, "Q1059636").await).await;
+    let brand_id = Uuid::parse_str(brand["id"].as_str().unwrap()).unwrap();
+    let first = service::refresh_locations(
+        &app.state.db,
+        &app.state.upstream,
+        brand_id,
+        "Q1059636",
+        now_unix(),
+    )
+    .await;
+    assert_eq!(first.unwrap(), 2);
+
+    for reply in [
+        json!({ "elements": [{ "type": "node", "id": 9, "lat": 1.0, "lon": 1.0 }], "remark": "runtime error: Query timed out" }),
+        json!({ "elements": [] }),
+    ] {
+        let flaky = spawn(Upstream {
+            overpass_reply: Some(reply),
+            ..Upstream::default()
+        })
+        .await;
+        // Same database, different (misbehaving) upstream.
+        let result = service::refresh_locations(
+            &app.state.db,
+            &flaky.state.upstream,
+            brand_id,
+            "Q1059636",
+            now_unix(),
+        )
+        .await;
+        assert!(result.is_err());
+    }
+    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM store_locations WHERE brand_id = ?")
+        .bind(brand_id)
+        .fetch_one(&app.state.db)
+        .await
+        .unwrap();
+    assert_eq!(count, 2);
+}
+
+#[tokio::test]
+async fn brand_search_only_lists_brands_of_visible_cards() {
+    let app = spawn(Upstream::default()).await;
+    let (_, alice_session) = app.bootstrap_admin("Alice").await;
+    // Another household on the same server uses Esselunga.
+    let other = tessera::accounts::service::issue_household_invite(
+        &app.state.db,
+        {
+            let id = Uuid::now_v7();
+            sqlx::query("INSERT INTO households (id, name, created_at) VALUES (?, 'Other', 0)")
+                .bind(id)
+                .execute(&app.state.db)
+                .await
+                .unwrap();
+            id
+        },
+        None,
+        now_unix(),
+    )
+    .await
+    .unwrap();
+    let (_, carlo_session) = app.register(&other.token.value, "Carlo").await;
+    let brand = json(link(&app, &carlo_session, "Q1059636").await).await;
+    card_with_brand(&app, &carlo_session, &brand["id"]).await;
+
+    let body = json(
+        app.get("/api/brands/search?q=Ess", Some(&alice_session))
+            .await,
+    )
+    .await;
+
+    assert_eq!(body["linked"], json!([]));
+}
+
+#[tokio::test]
+async fn places_have_their_own_endpoint_and_card_saves_keep_them() {
+    let app = spawn_app().await;
+    let (alice, alice_session) = app.bootstrap_admin("Alice").await;
+    let (_, bea_session) = app.add_member(&alice, "Bea").await;
+    let id = Uuid::now_v7();
+    let uri = format!("/api/cards/{id}");
+    let card = json!({ "storeName": "Forno", "cardNumber": "1", "barcodeFormat": "none" });
+    app.put(&uri, card.clone(), Some(&alice_session)).await;
+
+    let response = app
+        .put(
+            &format!("{uri}/places"),
+            json!({ "places": [{ "label": "Forno", "lat": 45.0, "lon": 9.0 }] }),
+            Some(&alice_session),
+        )
+        .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    // A later edit that does not mention places leaves them alone.
+    let mut edit = card.clone();
+    edit["notes"] = json!("bread");
+    let saved = json(app.put(&uri, edit, Some(&alice_session)).await).await;
+    assert_eq!(saved["places"][0]["label"], "Forno");
+
+    let response = app
+        .put(
+            &format!("{uri}/places"),
+            json!({ "places": [] }),
+            Some(&bea_session),
+        )
+        .await;
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    let response = app
+        .put(
+            &format!("{uri}/places"),
+            json!({ "places": [{ "label": "x", "lat": 0.0, "lon": 200.0 }] }),
+            Some(&alice_session),
+        )
+        .await;
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 }

@@ -7,7 +7,7 @@ use uuid::Uuid;
 use super::model::{BrandDto, BrandLocationsDto, BrandSearchDto, LocationsDto};
 use super::repo;
 use super::upstream::Upstream;
-use super::wikidata;
+use super::{overpass, wikidata};
 use crate::accounts::repo as accounts_repo;
 use crate::error::ApiError;
 
@@ -15,10 +15,13 @@ use crate::error::ApiError;
 const MIN_QUERY_CHARS: usize = 2;
 const MAX_QUERY_CHARS: usize = 64;
 const LOCAL_RESULTS: u32 = 5;
+/// Far beyond two people's wallets; stops anyone from filling the brand table.
+pub const MAX_BRANDS: i64 = 1_000;
 
 pub async fn search(
     pool: &SqlitePool,
     upstream: &Upstream,
+    user_id: Uuid,
     raw_query: &str,
 ) -> Result<BrandSearchDto, ApiError> {
     let query = raw_query.trim();
@@ -29,7 +32,10 @@ pub async fn search(
             "search for {MIN_QUERY_CHARS} to {MAX_QUERY_CHARS} characters"
         )));
     }
-    let linked = repo::search(pool, query, LOCAL_RESULTS).await?;
+    let household_id = accounts_repo::membership_of(pool, user_id)
+        .await?
+        .map(|m| m.household_id);
+    let linked = repo::search(pool, user_id, household_id, query, LOCAL_RESULTS).await?;
     let (candidates, remote_unavailable) = match upstream.search_brands(query).await {
         Ok(hits) => (hits, false),
         Err(error) => {
@@ -66,6 +72,9 @@ pub async fn link(
     if let Some(brand) = repo::find_by_wikidata(pool, qid).await? {
         return Ok((brand, false));
     }
+    if repo::count(pool).await? >= MAX_BRANDS {
+        return Err(ApiError::QuotaExceeded("too many brands on this server"));
+    }
     let name = upstream
         .brand_label(qid)
         .await
@@ -81,7 +90,8 @@ pub async fn link(
     Ok((brand, true))
 }
 
-/// Replaces the brand's shops with a fresh Overpass result.
+/// Replaces the brand's shops with a fresh Overpass result. A failed, partial
+/// or suspiciously empty answer keeps the shops already stored.
 pub async fn refresh_locations(
     pool: &SqlitePool,
     upstream: &Upstream,
@@ -89,19 +99,40 @@ pub async fn refresh_locations(
     qid: &str,
     now: i64,
 ) -> Result<usize, ApiError> {
-    let locations = match upstream.store_locations(qid).await {
-        Ok(locations) => locations,
+    // Stored ids were validated on insert; re-check before building a query from one.
+    if !wikidata::is_qid(qid) {
+        return Err(ApiError::Internal(format!(
+            "brand {brand_id} has an invalid Wikidata id"
+        )));
+    }
+    let fetched = upstream.store_locations(qid).await;
+    let locations = match fetched {
+        Ok(locations)
+            if !locations.is_empty() || repo::count_locations(pool, brand_id).await? == 0 =>
+        {
+            locations
+        }
+        Ok(_) => {
+            tracing::warn!(qid, "Overpass returned no shops; keeping the stored ones");
+            repo::mark_failed(pool, brand_id, now).await?;
+            return Err(ApiError::Unavailable);
+        }
         Err(error) => {
             tracing::warn!(%error, qid, "Overpass query failed");
             repo::mark_failed(pool, brand_id, now).await?;
             return Err(ApiError::Unavailable);
         }
     };
+    if locations.len() >= overpass::MAX_LOCATIONS {
+        tracing::warn!(
+            qid,
+            "store locations truncated at {}",
+            overpass::MAX_LOCATIONS
+        );
+    }
     let mut tx = pool.begin().await?;
     repo::delete_locations(&mut *tx, brand_id).await?;
-    for location in &locations {
-        repo::insert_location(&mut *tx, brand_id, location).await?;
-    }
+    repo::insert_locations(&mut tx, brand_id, &locations).await?;
     repo::mark_synced(&mut *tx, brand_id, now).await?;
     tx.commit().await?;
     tracing::info!(qid, count = locations.len(), "store locations refreshed");

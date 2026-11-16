@@ -1,9 +1,8 @@
 import { useState } from 'react'
 import type { Place } from '../../api/generated/Place'
 import { Button } from '../../components/Button'
-import type { LocalCard } from '../../offline/db'
+import { type LocalCard, db } from '../../offline/db'
 import { enqueue } from '../../offline/syncEngine'
-import { toInput } from './cardInput'
 
 /** Matches the server's limit per card. */
 const MAX_PLACES = 20
@@ -14,12 +13,11 @@ export function PlacesSection({ card }: { readonly card: LocalCard }) {
   const [locating, setLocating] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const save = (places: readonly Place[]) =>
-    enqueue(card.id, {
-      type: 'save',
-      input: { ...toInput(card), places: [...places] },
-      brandName: card.brandName,
-    })
+  /** Changes the latest stored places (not this render's copy, which may be stale by now). */
+  const update = async (change: (places: readonly Place[]) => readonly Place[]) => {
+    const latest = (await db.cards.get(card.id))?.places ?? card.places
+    await enqueue(card.id, { type: 'places', places: change(latest) })
+  }
 
   const markHere = () => {
     if (!('geolocation' in navigator)) return setError('Location is not available on this device.')
@@ -28,7 +26,10 @@ export function PlacesSection({ card }: { readonly card: LocalCard }) {
     navigator.geolocation.getCurrentPosition(
       ({ coords }) => {
         setLocating(false)
-        void save([...card.places, { label: card.storeName, lat: coords.latitude, lon: coords.longitude }])
+        void update((places) => [
+          ...places,
+          { label: card.storeName, lat: coords.latitude, lon: coords.longitude },
+        ])
       },
       (failure) => {
         setLocating(false)
@@ -58,7 +59,7 @@ export function PlacesSection({ card }: { readonly card: LocalCard }) {
               <Button
                 variant="secondary"
                 aria-label={`Remove location ${index + 1}`}
-                onClick={() => void save(card.places.filter((_, i) => i !== index))}
+                onClick={() => void update((places) => places.filter((_, i) => i !== index))}
               >
                 Remove
               </Button>
