@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { z } from 'zod'
-import { ApiError, getJson, isApiError, postJson, sendRequest } from './client'
+import { ApiError, getJson, isApiError, postJson, putBlob, putJson, sendRequest } from './client'
 
 const schema = z.object({ name: z.string() })
 
@@ -100,6 +100,31 @@ describe('postJson', () => {
     expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({
       body: undefined,
       headers: { Accept: 'application/json' },
+    })
+  })
+})
+
+describe('putJson', () => {
+  it('sends the body as JSON with PUT', async () => {
+    const fetchMock = mockFetch(jsonResponse({ name: 'ok' }))
+
+    await expect(putJson('/api/things/1', schema, { a: 1 })).resolves.toEqual({ name: 'ok' })
+
+    expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({ method: 'PUT', body: '{"a":1}' })
+  })
+})
+
+describe('putBlob', () => {
+  it('sends the blob unchanged with its own content type', async () => {
+    const fetchMock = mockFetch(jsonResponse({ name: 'ok' }))
+    const blob = new Blob(['x'], { type: 'image/webp' })
+
+    await putBlob('/api/things/1/image', schema, blob)
+
+    expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({
+      method: 'PUT',
+      body: blob,
+      headers: { Accept: 'application/json', 'Content-Type': 'image/webp' },
     })
   })
 })

@@ -13,13 +13,14 @@ use axum::{Router, middleware};
 use tower_http::compression::CompressionLayer;
 use tower_http::trace::TraceLayer;
 
-use crate::accounts;
 use crate::error::ApiError;
 use crate::state::AppState;
+use crate::{accounts, cards};
 
 pub use meta::AppInfo;
 
-/// JSON bodies are small (WebAuthn credentials are a few KiB).
+/// JSON bodies are small (WebAuthn credentials are a few KiB); photo uploads
+/// raise their own limit.
 const API_BODY_LIMIT: usize = 64 * 1024;
 
 pub fn router(state: AppState) -> Router {
@@ -27,6 +28,7 @@ pub fn router(state: AppState) -> Router {
     let api = Router::new()
         .route("/version", get(meta::version))
         .merge(accounts::routes(&state))
+        .merge(cards::routes())
         .fallback(api_not_found)
         .layer(DefaultBodyLimit::max(API_BODY_LIMIT))
         .layer(middleware::from_fn_with_state(

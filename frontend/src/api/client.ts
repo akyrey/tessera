@@ -24,9 +24,10 @@ const errorBodySchema = z.object({
   error: z.object({ code: z.string(), message: z.string() }),
 }) satisfies z.ZodType<ErrorBody>
 
-type Method = 'GET' | 'POST' | 'DELETE'
+type Method = 'GET' | 'POST' | 'PUT' | 'DELETE'
 
 interface RequestOptions {
+  /** JSON-encoded unless it is a `Blob`, which is sent as-is with its own type. */
   readonly body?: unknown
   readonly signal?: AbortSignal
 }
@@ -39,6 +40,16 @@ export function getJson<T>(path: string, schema: z.ZodType<T>, signal?: AbortSig
 /** POSTs `body` as JSON and validates the JSON response against `schema`. */
 export function postJson<T>(path: string, schema: z.ZodType<T>, body?: unknown): Promise<T> {
   return requestJson('POST', path, schema, { body })
+}
+
+/** PUTs `body` as JSON and validates the JSON response against `schema`. */
+export function putJson<T>(path: string, schema: z.ZodType<T>, body: unknown): Promise<T> {
+  return requestJson('PUT', path, schema, { body })
+}
+
+/** PUTs a binary body (e.g. a photo) and validates the JSON response against `schema`. */
+export function putBlob<T>(path: string, schema: z.ZodType<T>, blob: Blob): Promise<T> {
+  return requestJson('PUT', path, schema, { body: blob })
 }
 
 /** Sends a request whose successful response has no body (e.g. 204). */
@@ -67,13 +78,15 @@ async function requestJson<T>(
 
 async function send(method: Method, path: string, { body, signal }: RequestOptions): Promise<Response> {
   const headers: Record<string, string> = { Accept: 'application/json' }
-  if (body !== undefined) headers['Content-Type'] = 'application/json'
+  const isBlob = body instanceof Blob
+  if (isBlob) headers['Content-Type'] = body.type
+  else if (body !== undefined) headers['Content-Type'] = 'application/json'
   try {
     return await fetch(path, {
       method,
       credentials: 'same-origin',
       headers,
-      body: body === undefined ? undefined : JSON.stringify(body),
+      body: isBlob || body === undefined ? body : JSON.stringify(body),
       signal,
     })
   } catch (error) {

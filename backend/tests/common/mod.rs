@@ -62,6 +62,28 @@ impl TestApp {
             .await
     }
 
+    pub async fn put(&self, uri: &str, body: Value, cookie: Option<&str>) -> Response {
+        self.send(json_request("PUT", uri, body, cookie, Some(ORIGIN)))
+            .await
+    }
+
+    /// Same-origin PUT of a raw body (photo uploads).
+    pub async fn put_bytes(
+        &self,
+        uri: &str,
+        content_type: &str,
+        bytes: Vec<u8>,
+        cookie: Option<&str>,
+    ) -> Response {
+        let mut builder = Request::put(uri)
+            .header(header::CONTENT_TYPE, content_type)
+            .header(header::ORIGIN, ORIGIN);
+        if let Some(token) = cookie {
+            builder = builder.header(header::COOKIE, format!("{COOKIE_NAME}={token}"));
+        }
+        self.send(builder.body(Body::from(bytes)).unwrap()).await
+    }
+
     pub async fn delete(&self, uri: &str, cookie: Option<&str>) -> Response {
         self.send(json_request(
             "DELETE",
@@ -80,6 +102,14 @@ impl TestApp {
             .await
             .unwrap()
             .expect("no users yet");
+        self.register(&invite.token.value, name).await
+    }
+
+    /// Invites `name` into `owner`'s household and registers them.
+    pub async fn add_member(&self, owner: &User, name: &str) -> (User, String) {
+        let invite = service::create_household_invite(&self.state.db, owner, now_unix())
+            .await
+            .unwrap();
         self.register(&invite.token.value, name).await
     }
 
@@ -127,6 +157,16 @@ pub fn json_request(
         Body::from(body.to_string())
     };
     builder.body(body).unwrap()
+}
+
+pub async fn bytes(response: Response) -> Vec<u8> {
+    response
+        .into_body()
+        .collect()
+        .await
+        .unwrap()
+        .to_bytes()
+        .to_vec()
 }
 
 pub async fn json(response: Response) -> Value {

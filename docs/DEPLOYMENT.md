@@ -26,6 +26,7 @@ container expects, so the manifests can be written and checked against it.
 - **Replicas: 1** and **`strategy: Recreate`**. SQLite allows a single writer; a rolling update would run two pods against one file.
 - **Volume**: a `ReadWriteOnce` PVC on the network-backed storage class, mounted at **`/data`**.
   Set `securityContext.fsGroup: 65532` so the volume is writable.
+  Card photos live in the database (≤ 512 KB each, typically ~100 KB, two per card): **1 Gi** is plenty for two people.
 - Suggested pod security: `runAsNonRoot: true`, `readOnlyRootFilesystem: true`, `allowPrivilegeEscalation: false`, drop all capabilities.
   The app writes only to `/data` (SQLite temp storage is kept in memory).
 - Resources: about 20 MiB RAM idle. Requests `cpu: 10m, memory: 32Mi`, limit `memory: 128Mi` is plenty for now.
@@ -94,6 +95,6 @@ Then a lost PVC recovers on the next pod start.
   (20 auth requests/min and 600 API requests/min per IPv4 address or IPv6 /64), which is only safe while nothing else can reach the pod.
   Also allow egress to DNS, R2 (Litestream) and, from M5, `overpass-api.de` / `query.wikidata.org`.
 - WAF custom rule: block when `ip.geoip.country ne "IT"`.
-- Caching: the app sends `Cache-Control` on every response: `immutable` for `/assets/*`, `no-cache` for `index.html`/`sw.js`/manifest/icons, `no-store` for everything else (API, probes, errors).
+- Caching: the app sends `Cache-Control` on every response: `immutable` for `/assets/*`, `no-cache` for `index.html`/`sw.js`/manifest/icons, `private, immutable` for card photos (`/api/images/*`, browser cache only), `no-store` for everything else (API, probes, errors).
   Keep Cloudflare on "respect origin headers"; don't add "cache everything" rules.
 - Don't enable Rocket Loader or HTML minification: they inject scripts that the CSP blocks.

@@ -109,9 +109,10 @@ The sync cursor is the last `change_seq` the client has seen.
 | `GET/POST/DELETE /api/me/passkeys` | Add a second device, revoke a passkey |
 | `GET /api/household` · `POST /api/household/invites` | Members, create an invite link |
 | `GET /api/changes?since=` | Pull sync |
-| `PUT /api/cards/{id}` · `DELETE /api/cards/{id}` | Idempotent upsert / soft delete |
-| `PUT /api/cards/{id}/prefs` | Favourite, usage bump |
-| `POST /api/cards/{id}/images` · `GET /api/images/{id}` | Upload (size/MIME validated), authorized download |
+| `GET /api/cards` | Cards visible to me, with my favourite/usage and photo ids (M2; superseded by `/api/changes` for offline use in M3) |
+| `PUT /api/cards/{id}` · `DELETE /api/cards/{id}` | Idempotent upsert (client-chosen UUIDv7) / soft delete leaving a tombstone |
+| `PUT /api/cards/{id}/prefs` · `POST /api/cards/{id}/use` | Per-user favourite; usage bump for "recently used" |
+| `PUT/DELETE /api/cards/{id}/images/{front\|back}` · `GET /api/images/{id}` | Raw-body photo upload (≤ 512 KB, type checked against magic bytes), authorized download |
 | `GET /api/brands/search?q=` | Search local brands, falling back to Wikidata |
 | `POST /api/brands` | Link a brand (wikidata id) and trigger a location fetch |
 
@@ -205,11 +206,29 @@ Each milestone is test-first and ends with something usable on a phone.
   invite token stripped from the address bar, household invites valid 48h.
   Open: list/revoke pending household invites (low priority for two users).
 
-### M2 — Cards core (online)
+### M2 — Cards core (online) ✅
 - Card CRUD with manual entry and barcode format picker. Validate number vs. format (e.g. EAN check digit).
 - Fullscreen card view: `bwip-js` render, white background, Wake Lock, number shown as text below.
 - List with search, favourites, "recently used". Front/back photos.
 - **Done when:** I can add my real cards by hand and scan them at a till.
+- *As built:* formats EAN-13/8, UPC-A, Code 128, Code 39, ITF, Codabar, QR, PDF417, Aztec, Data Matrix, and
+  "number only". Validation lives in `cards/barcode.rs` (authoritative) and is mirrored in
+  `features/cards/barcodeFormats.ts` for instant feedback; numeric formats drop spaces, Code 39/Codabar are upper-cased.
+  Every write takes a number from `change_counter` (first statement of the transaction, so it also takes the SQLite
+  write lock), ready for M3 pull sync. Deleting leaves a content-free tombstone and drops photos and prefs; a replayed
+  `PUT` cannot resurrect it. Access goes through `cards/policy.rs`; cards a user cannot see answer 404.
+  Photos are downscaled on the phone (≤ 1280 px, WebP or JPEG on Safari, EXIF dropped) and stored as BLOBs;
+  each replacement gets a new id, so image responses are cached as `immutable`.
+  Barcodes are rendered as SVG `data:` images (lazy-loaded `bwip-js`). The web cannot raise screen brightness:
+  turn it up by hand at the till.
+  E2E: the passkey journey adds, shows, favourites, edits and deletes a card on Chromium; `cards.spec.ts` renders
+  barcodes and re-encodes photos on both Chromium and WebKit with a stubbed JSON API.
+  Security review follow-ups (done): per-user caps (500 cards, 100 MB of photos → `409 quota_exceeded`),
+  `410 card_deleted` when the owner saves a deleted card, JSON envelope for oversized uploads, tombstones drop the
+  household link. Open: optimistic concurrency (`updatedAt` precondition → 409) before sharing makes concurrent
+  edits likely (M3/M4); resolve the viewer's household inside the write transaction (M4); photos stay in the
+  browser cache after deletion (`private, immutable`), accepted for personal phones; uploads are checked by magic
+  bytes, not fully decoded.
 
 ### M3 — Scanning & offline
 - Camera scan with `zxing-wasm`, plus scan from an imported photo or screenshot.

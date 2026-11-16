@@ -1,5 +1,8 @@
 import { z } from 'zod'
+import type { BarcodeFormat } from './generated/BarcodeFormat'
+import type { CardDto } from './generated/CardDto'
 import type { CeremonyStart } from './generated/CeremonyStart'
+import type { ImageCreated } from './generated/ImageCreated'
 import type { HouseholdDto } from './generated/HouseholdDto'
 import type { InviteCreated } from './generated/InviteCreated'
 import type { InvitePreview } from './generated/InvitePreview'
@@ -57,3 +60,40 @@ export const ceremonyStartSchema = z.object({
   ceremonyId: z.string(),
   options: z.unknown(),
 }) satisfies z.ZodType<CeremonyStart>
+
+export const BARCODE_FORMATS = [
+  'ean13',
+  'ean8',
+  'upca',
+  'code128',
+  'code39',
+  'itf',
+  'codabar',
+  'qr',
+  'pdf417',
+  'aztec',
+  'datamatrix',
+  'none',
+] as const satisfies readonly BarcodeFormat[]
+
+export const barcodeFormatSchema = z.enum(BARCODE_FORMATS) satisfies z.ZodType<BarcodeFormat>
+
+export const cardSchema = z.object({
+  id: z.string(),
+  ownerId: z.string(),
+  storeName: z.string(),
+  cardNumber: z.string(),
+  barcodeFormat: barcodeFormatSchema,
+  memberName: z.string().nullable(),
+  color: z.string().nullable(),
+  notes: z.string().nullable(),
+  isFavorite: z.boolean(),
+  useCount: z.number(),
+  lastUsedAt: z.number().nullable(),
+  frontImageId: z.string().nullable(),
+  backImageId: z.string().nullable(),
+  createdAt: z.number(),
+  updatedAt: z.number(),
+}) satisfies z.ZodType<CardDto>
+
+export const imageCreatedSchema = z.object({ id: z.string() }) satisfies z.ZodType<ImageCreated>

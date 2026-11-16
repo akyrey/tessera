@@ -1,7 +1,7 @@
 //! API error type rendered as `{ "error": { "code", "message" } }`.
 
 use axum::Json;
-use axum::extract::rejection::JsonRejection;
+use axum::extract::rejection::{BytesRejection, JsonRejection, PathRejection};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use serde::Serialize;
@@ -40,6 +40,12 @@ pub enum ApiError {
     NotFound,
     #[error("{0}")]
     Conflict(&'static str),
+    #[error("request body is too large")]
+    PayloadTooLarge,
+    #[error("this card was deleted")]
+    CardDeleted,
+    #[error("{0}")]
+    QuotaExceeded(&'static str),
     #[error("too many requests, slow down")]
     RateLimited,
     #[error("service unavailable")]
@@ -67,6 +73,9 @@ impl ApiError {
             Self::BadOrigin => (StatusCode::FORBIDDEN, "bad_origin"),
             Self::NotFound => (StatusCode::NOT_FOUND, "not_found"),
             Self::Conflict(_) => (StatusCode::CONFLICT, "conflict"),
+            Self::PayloadTooLarge => (StatusCode::PAYLOAD_TOO_LARGE, "payload_too_large"),
+            Self::CardDeleted => (StatusCode::GONE, "card_deleted"),
+            Self::QuotaExceeded(_) => (StatusCode::CONFLICT, "quota_exceeded"),
             Self::RateLimited => (StatusCode::TOO_MANY_REQUESTS, "rate_limited"),
             Self::Unavailable => (StatusCode::SERVICE_UNAVAILABLE, "unavailable"),
             Self::Database(_) | Self::Internal(_) => {
@@ -78,6 +87,22 @@ impl ApiError {
 
 impl From<JsonRejection> for ApiError {
     fn from(rejection: JsonRejection) -> Self {
+        Self::Validation(rejection.body_text())
+    }
+}
+
+impl From<BytesRejection> for ApiError {
+    fn from(rejection: BytesRejection) -> Self {
+        if rejection.status() == StatusCode::PAYLOAD_TOO_LARGE {
+            Self::PayloadTooLarge
+        } else {
+            Self::Validation(rejection.body_text())
+        }
+    }
+}
+
+impl From<PathRejection> for ApiError {
+    fn from(rejection: PathRejection) -> Self {
         Self::Validation(rejection.body_text())
     }
 }
@@ -106,3 +131,8 @@ impl IntoResponse for ApiError {
 #[derive(axum::extract::FromRequest)]
 #[from_request(via(axum::Json), rejection(ApiError))]
 pub struct ApiJson<T>(pub T);
+
+/// `Path<T>` whose rejections use the API error envelope instead of plain text.
+#[derive(axum::extract::FromRequestParts)]
+#[from_request(via(axum::extract::Path), rejection(ApiError))]
+pub struct ApiPath<T>(pub T);

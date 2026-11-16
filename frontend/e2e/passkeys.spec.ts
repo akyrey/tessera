@@ -1,6 +1,12 @@
 import { type Page, expect, test } from '@playwright/test'
 import { E2E_BOOTSTRAP_TOKEN } from './constants.ts'
 
+/** A real 2×2 PNG, so the browser can decode and re-encode it like a camera photo. */
+const PHOTO_PNG = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEElEQVR4nGP4z8AARAwQCgAf7gP9i18U1AAAAABJRU5ErkJggg==',
+  'base64',
+)
+
 // Chromium's virtual authenticator (CDP) performs real WebAuthn ceremonies
 // against the Rust server: real challenges, signatures and verification.
 test.skip(({ browserName }) => browserName !== 'chromium', 'virtual authenticators need Chromium (CDP)')
@@ -36,7 +42,7 @@ test('admin sets up Tessera, invites a household member, and both use passkeys',
     await page.getByLabel('Your name').fill('Alice')
     await page.getByRole('button', { name: 'Create passkey' }).click()
 
-    await expect(page.getByRole('heading', { name: 'Hi, Alice' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Cards', exact: true })).toBeVisible()
     const credentials = await adminDevice.credentials()
     expect(credentials).toHaveLength(1)
     expect(credentials[0]?.isResidentCredential).toBe(true)
@@ -68,7 +74,7 @@ test('admin sets up Tessera, invites a household member, and both use passkeys',
     await expect(memberPage.getByText('invited to join "Home"')).toBeVisible()
     await memberPage.getByLabel('Your name').fill('Bea')
     await memberPage.getByRole('button', { name: 'Create passkey' }).click()
-    await expect(memberPage.getByRole('heading', { name: 'Hi, Bea' })).toBeVisible()
+    await expect(memberPage.getByRole('heading', { name: 'Cards', exact: true })).toBeVisible()
 
     await memberPage.getByRole('link', { name: 'Settings' }).click()
     const household = memberPage.getByRole('region', { name: 'Home' })
@@ -93,9 +99,55 @@ test('admin sets up Tessera, invites a household member, and both use passkeys',
     await expect(page).toHaveURL(/\/login$/)
 
     await page.getByRole('button', { name: 'Sign in with passkey' }).click()
-    await expect(page.getByRole('heading', { name: 'Hi, Alice' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Cards', exact: true })).toBeVisible()
 
     await page.getByRole('link', { name: 'Settings' }).click()
     await expect(page.getByRole('region', { name: 'Passkeys' }).getByText(/last used/)).toBeVisible()
+  })
+
+  await test.step('admin adds a card with a photo and shows it at the till', async () => {
+    const consoleErrors: string[] = []
+    page.on('console', (message) => {
+      if (message.type() === 'error') consoleErrors.push(message.text())
+    })
+    await page.goto('/')
+    await page.getByRole('link', { name: 'Add card' }).click()
+    await page.getByLabel('Store name').fill('Esselunga')
+    await page.getByLabel('Card number').fill('4006381333932')
+    await expect(page.getByText(/last digit does not match/)).toBeVisible()
+    await page.getByLabel('Card number').fill('4 006381 333931')
+    await page
+      .getByLabel('Front photo')
+      .setInputFiles({ name: 'front.png', mimeType: 'image/png', buffer: PHOTO_PNG })
+    await expect(page.getByRole('img', { name: 'Front' })).toBeVisible()
+    await page.getByRole('button', { name: 'Save card' }).click()
+
+    await expect(page.getByRole('heading', { name: 'Esselunga' })).toBeVisible()
+    await expect(page.getByRole('img', { name: /EAN-13/ })).toBeVisible()
+    await expect(page.getByText('4006381333931')).toBeVisible()
+    const photo = page.getByRole('img', { name: 'Front of the card' })
+    await expect(photo).toBeVisible()
+    expect(await photo.evaluate((img: HTMLImageElement) => img.naturalWidth)).toBe(2)
+
+    await page.getByRole('button', { name: 'Favourite' }).click()
+    await expect(page.getByRole('button', { name: 'Favourite' })).toHaveAttribute('aria-pressed', 'true')
+    await page.getByRole('link', { name: '‹ Cards' }).click()
+    await expect(
+      page.getByRole('region', { name: 'Favourites' }).getByRole('link', { name: /Esselunga/ }),
+    ).toBeVisible()
+    expect(consoleErrors).toEqual([])
+  })
+
+  await test.step('admin edits and deletes the card', async () => {
+    await page.getByRole('link', { name: /Esselunga/ }).click()
+    await page.getByRole('link', { name: 'Edit' }).click()
+    await page.getByLabel('Store name').fill('Esselunga Prima')
+    await page.getByRole('button', { name: 'Save card' }).click()
+    await expect(page.getByRole('heading', { name: 'Esselunga Prima' })).toBeVisible()
+
+    await page.getByRole('link', { name: 'Edit' }).click()
+    await page.getByRole('button', { name: 'Delete card' }).click()
+    await page.getByRole('button', { name: 'Tap again to delete for good' }).click()
+    await expect(page.getByRole('heading', { name: 'No cards yet' })).toBeVisible()
   })
 })

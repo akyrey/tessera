@@ -1,6 +1,7 @@
 import { screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import * as accounts from '../api/accounts'
+import * as cards from '../api/cards'
 import { ApiError } from '../api/client'
 import * as meta from '../api/meta'
 import * as webauthn from '../features/auth/webauthn'
@@ -9,6 +10,7 @@ import { renderRoute } from '../test/renderRoute'
 
 vi.mock('../api/accounts')
 vi.mock('../api/meta')
+vi.mock('../api/cards')
 vi.mock('../features/auth/webauthn', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../features/auth/webauthn')>()),
   supportsPasskeys: vi.fn(() => true),
@@ -19,6 +21,7 @@ vi.mock('../features/auth/webauthn', async (importOriginal) => ({
 beforeEach(() => {
   vi.mocked(meta.fetchAppInfo).mockResolvedValue({ name: 'tessera', version: '0.1.0' })
   vi.mocked(webauthn.supportsPasskeys).mockReturnValue(true)
+  vi.mocked(cards.listCards).mockResolvedValue([])
 })
 
 describe('route guard', () => {
@@ -36,7 +39,7 @@ describe('route guard', () => {
 
     renderRoute('/')
 
-    expect(await screen.findByRole('heading', { name: 'Hi, Alice' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Cards' })).toBeInTheDocument()
   })
 
   it('offers a retry when the session check fails', async () => {
@@ -48,7 +51,7 @@ describe('route guard', () => {
 
     expect(await screen.findByRole('alert')).toHaveTextContent(/connection/)
     await user.click(screen.getByRole('button', { name: 'Retry' }))
-    expect(await screen.findByRole('heading', { name: 'Hi, Alice' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Cards' })).toBeInTheDocument()
   })
 
   it('redirects unknown paths home', async () => {
@@ -71,7 +74,7 @@ describe('sign in', () => {
     const { router, user } = renderRoute('/login')
     await user.click(await screen.findByRole('button', { name: 'Sign in with passkey' }))
 
-    expect(await screen.findByRole('heading', { name: 'Hi, Alice' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Cards' })).toBeInTheDocument()
     expect(webauthn.requestPasskey).toHaveBeenCalledWith(ceremony.options)
     expect(accounts.finishLogin).toHaveBeenCalledWith('c-1', { id: 'assertion' })
     expect(router.state.location.pathname).toBe('/')
@@ -148,7 +151,7 @@ describe('invite links', () => {
     await user.type(screen.getByLabelText('Your name'), '  Bea ')
     await user.click(submit)
 
-    expect(await screen.findByRole('heading', { name: 'Hi, Bea' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Cards' })).toBeInTheDocument()
     expect(accounts.previewInvite).toHaveBeenCalledWith('tok')
     expect(window.location.hash).toBe('')
     expect(accounts.startRegistration).toHaveBeenCalledWith({ token: 'tok', displayName: 'Bea' })
@@ -183,7 +186,7 @@ describe('invite links', () => {
     expect(screen.queryByLabelText('Your name')).not.toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'Create passkey' }))
 
-    expect(await screen.findByRole('heading', { name: 'Hi, Alice' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Cards' })).toBeInTheDocument()
     expect(accounts.startRegistration).toHaveBeenCalledWith({ token: 'tok', displayName: undefined })
   })
 
