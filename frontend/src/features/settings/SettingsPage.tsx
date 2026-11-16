@@ -4,6 +4,7 @@ import { logout, signOutEverywhere } from '../../api/accounts'
 import { Alert } from '../../components/Alert'
 import { Button } from '../../components/Button'
 import { Screen } from '../../components/Screen'
+import { clearLocalData } from '../../offline/db'
 import { describeError } from '../auth/errors'
 import { useMe } from '../auth/useMe'
 import { HouseholdSection } from './HouseholdSection'
@@ -14,9 +15,11 @@ export function SettingsPage() {
   const queryClient = useQueryClient()
   const navigate = useNavigate()
 
-  const leave = () => {
+  const leave = async () => {
+    // Shared or lost devices must not keep a copy of the cards.
+    await clearLocalData()
     queryClient.clear()
-    void navigate('/login', { replace: true })
+    await navigate('/login', { replace: true })
   }
   const signOut = useMutation({ mutationFn: logout, onSuccess: leave })
   const signOutAll = useMutation({ mutationFn: signOutEverywhere, onSuccess: leave })

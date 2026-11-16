@@ -127,7 +127,7 @@ test('admin sets up Tessera, invites a household member, and both use passkeys',
     await expect(page.getByText('4006381333931')).toBeVisible()
     const photo = page.getByRole('img', { name: 'Front of the card' })
     await expect(photo).toBeVisible()
-    expect(await photo.evaluate((img: HTMLImageElement) => img.naturalWidth)).toBe(2)
+    await expect.poll(() => photo.evaluate((img: HTMLImageElement) => img.naturalWidth)).toBe(2)
 
     await page.getByRole('button', { name: 'Favourite' }).click()
     await expect(page.getByRole('button', { name: 'Favourite' })).toHaveAttribute('aria-pressed', 'true')
@@ -136,6 +136,40 @@ test('admin sets up Tessera, invites a household member, and both use passkeys',
       page.getByRole('region', { name: 'Favourites' }).getByRole('link', { name: /Esselunga/ }),
     ).toBeVisible()
     expect(consoleErrors).toEqual([])
+  })
+
+  await test.step('cards open and can be edited without network, then sync', async () => {
+    // The service worker must control the page before the network goes away.
+    await page.evaluate(async () => {
+      await navigator.serviceWorker.ready
+      if (!navigator.serviceWorker.controller) {
+        await new Promise((resolve) => navigator.serviceWorker.addEventListener('controllerchange', resolve))
+      }
+    })
+    await page.context().setOffline(true)
+    await page.reload()
+    await expect(page.getByRole('heading', { name: 'Cards', exact: true })).toBeVisible()
+    await page.getByRole('link', { name: /Esselunga/ }).click()
+    await expect(page.getByRole('img', { name: /EAN-13/ })).toBeVisible()
+    await expect(page.getByRole('img', { name: 'Front of the card' })).toBeVisible()
+
+    await page.getByRole('link', { name: 'Edit' }).click()
+    await page.getByLabel('Name on the card (optional)').fill('Alice R.')
+    await page.getByRole('button', { name: 'Save card' }).click()
+    await expect(page.getByText('Alice R.')).toBeVisible()
+    await page.getByRole('link', { name: '‹ Cards' }).click()
+    await expect(page.getByText(/\d+ changes? will sync when you are back online/)).toBeVisible()
+
+    await page.context().setOffline(false)
+    // Playwright's network emulation does not fire the `online` event that phones do.
+    await page.evaluate(() => window.dispatchEvent(new Event('online')))
+    await expect(page.getByText(/Offline/)).toBeHidden()
+    // A fresh device state proves the edit reached the server.
+    await page.evaluate(() => indexedDB.deleteDatabase('tessera'))
+    await page.reload()
+    await page.getByRole('link', { name: /Esselunga/ }).click()
+    await expect(page.getByText('Alice R.')).toBeVisible()
+    await page.getByRole('link', { name: '‹ Cards' }).click()
   })
 
   await test.step('admin edits and deletes the card', async () => {

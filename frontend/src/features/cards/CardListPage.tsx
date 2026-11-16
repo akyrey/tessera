@@ -1,21 +1,20 @@
 import { useState } from 'react'
 import { Link } from 'react-router'
 import type { CardDto } from '../../api/generated/CardDto'
-import { Alert } from '../../components/Alert'
-import { Button } from '../../components/Button'
 import { Screen } from '../../components/Screen'
-import { describeError } from '../auth/errors'
+import { SyncBanner } from '../../offline/SyncBanner'
 import { useMe } from '../auth/useMe'
 import { CardTile } from './CardTile'
 import { byStoreName, matchesQuery, organizeCards } from './organizeCards'
-import { useCards } from './useCards'
+import { useHasSynced, useLocalCards } from './useCards'
 
 const LINK_BUTTON =
   'inline-flex min-h-11 items-center justify-center rounded-xl px-4 py-2.5 font-medium transition-colors'
 
 export function CardListPage() {
   const me = useMe().data
-  const cards = useCards()
+  const cards = useLocalCards()
+  const hasSynced = useHasSynced()
   const [query, setQuery] = useState('')
 
   return (
@@ -33,35 +32,24 @@ export function CardListPage() {
         </Link>
       </header>
 
-      {cards.isPending && <p role="status">Loading cards…</p>}
-      {cards.isError && (
-        <div className="flex flex-col gap-3">
-          <Alert>{describeError(cards.error)}</Alert>
-          <Button variant="secondary" onClick={() => void cards.refetch()}>
-            Try again
-          </Button>
-        </div>
+      <SyncBanner />
+      {cards === undefined || (cards.length === 0 && !hasSynced) ? (
+        <p role="status">Loading cards…</p>
+      ) : cards.length === 0 ? (
+        <EmptyWallet />
+      ) : (
+        <>
+          <input
+            type="search"
+            aria-label="Search cards"
+            placeholder="Search cards"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            className="min-h-11 rounded-xl bg-white px-4 ring-1 ring-brand-900/15 focus:ring-2 focus:ring-brand-700 focus:outline-none"
+          />
+          {query.trim() ? <SearchResults cards={cards} query={query} /> : <Wallet cards={cards} />}
+        </>
       )}
-      {cards.isSuccess &&
-        (cards.data.length === 0 ? (
-          <EmptyWallet />
-        ) : (
-          <>
-            <input
-              type="search"
-              aria-label="Search cards"
-              placeholder="Search cards"
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              className="min-h-11 rounded-xl bg-white px-4 ring-1 ring-brand-900/15 focus:ring-2 focus:ring-brand-700 focus:outline-none"
-            />
-            {query.trim() ? (
-              <SearchResults cards={cards.data} query={query} />
-            ) : (
-              <Wallet cards={cards.data} />
-            )}
-          </>
-        ))}
 
       <Link
         to="/cards/new"

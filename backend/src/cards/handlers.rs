@@ -1,8 +1,8 @@
 //! `/api/cards/*` and `/api/images/*` endpoints.
 
 use axum::body::Bytes;
-use axum::extract::rejection::BytesRejection;
-use axum::extract::{DefaultBodyLimit, State};
+use axum::extract::rejection::{BytesRejection, QueryRejection};
+use axum::extract::{DefaultBodyLimit, Query, State};
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post, put};
@@ -10,7 +10,7 @@ use axum::{Json, Router};
 use uuid::Uuid;
 
 use super::images::{self, MAX_IMAGE_BYTES};
-use super::model::{CardDto, CardInput, CardPrefsInput, ImageCreated, ImageKind};
+use super::model::{CardDto, CardInput, CardPrefsInput, ChangesDto, ImageCreated, ImageKind};
 use super::policy::Viewer;
 use super::service;
 use crate::accounts::sessions::CurrentUser;
@@ -31,6 +31,7 @@ pub fn routes() -> Router<AppState> {
 
     Router::new()
         .route("/cards", get(list_cards))
+        .route("/changes", get(changes))
         .route("/cards/{id}", put(put_card).delete(delete_card))
         .route("/cards/{id}/prefs", put(put_prefs))
         .route("/cards/{id}/use", post(record_use))
@@ -48,6 +49,24 @@ async fn list_cards(
 ) -> Result<Json<Vec<CardDto>>, ApiError> {
     let viewer = viewer(&state, user).await?;
     service::list_cards(&state.db, viewer).await.map(Json)
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct ChangesQuery {
+    #[serde(default)]
+    since: i64,
+}
+
+async fn changes(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    query: Result<Query<ChangesQuery>, QueryRejection>,
+) -> Result<Json<ChangesDto>, ApiError> {
+    let Query(query) = query.map_err(|e| ApiError::Validation(e.body_text()))?;
+    let viewer = viewer(&state, user).await?;
+    service::changes_since(&state.db, viewer, query.since)
+        .await
+        .map(Json)
 }
 
 async fn put_card(

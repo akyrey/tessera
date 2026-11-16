@@ -3,6 +3,7 @@ import { card } from '../test/fixtures'
 import {
   deleteCard,
   deleteImage,
+  fetchChanges,
   imageUrl,
   listCards,
   recordUse,
@@ -71,6 +72,12 @@ describe('cards api', () => {
     await expect(uploadImage('c1', 'front', photo)).resolves.toEqual({ id: 'img-1' })
 
     expect(lastCall(fetchMock)).toEqual({ path: '/api/cards/c1/images/front', method: 'PUT', body: photo })
+  })
+
+  it('pulls changes after a cursor', async () => {
+    const fetchMock = respond({ cursor: 7, cards: null })
+    await expect(fetchChanges(3)).resolves.toEqual({ cursor: 7, cards: null })
+    expect(lastCall(fetchMock).path).toBe('/api/changes?since=3')
   })
 
   it('builds image urls', () => {

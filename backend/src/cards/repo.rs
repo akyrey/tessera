@@ -30,6 +30,12 @@ pub async fn next_change_seq(ex: impl SqliteExecutor<'_>) -> sqlx::Result<i64> {
         .await
 }
 
+pub async fn current_change_seq(ex: impl SqliteExecutor<'_>) -> sqlx::Result<i64> {
+    sqlx::query_scalar("SELECT value FROM change_counter WHERE id = 1")
+        .fetch_one(ex)
+        .await
+}
+
 // ---------- cards ----------
 
 /// Cards visible to `user_id` (own cards and cards shared with `household_id`).

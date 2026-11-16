@@ -103,3 +103,15 @@ pub struct StoredImage {
     pub owner_id: Uuid,
     pub household_id: Option<Uuid>,
 }
+
+/// Answer to `GET /api/changes?since=`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct ChangesDto {
+    /// Pass back as `since` on the next pull.
+    #[ts(type = "number")]
+    pub cursor: i64,
+    /// Every card visible to the caller, or `null` when nothing changed since `since`.
+    pub cards: Option<Vec<CardDto>>,
+}

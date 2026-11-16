@@ -1,25 +1,12 @@
-import { type QueryClient, useQuery } from '@tanstack/react-query'
-import { listCards } from '../../api/cards'
-import type { CardDto } from '../../api/generated/CardDto'
+import { useLiveQuery } from 'dexie-react-hooks'
+import { type LocalCard, db } from '../../offline/db'
 
-export const CARDS_QUERY_KEY = ['cards'] as const
-
-export function useCards() {
-  return useQuery({
-    queryKey: CARDS_QUERY_KEY,
-    queryFn: ({ signal }) => listCards(signal),
-    staleTime: 30_000,
-  })
+/** Cards stored on this device; `undefined` while IndexedDB is being read. */
+export function useLocalCards(): readonly LocalCard[] | undefined {
+  return useLiveQuery(() => db.cards.toArray(), [])
 }
 
-/** Puts a saved card into the cached list without refetching it. */
-export function storeCard(queryClient: QueryClient, card: CardDto): void {
-  queryClient.setQueryData<CardDto[]>(CARDS_QUERY_KEY, (cards = []) => {
-    const others = cards.filter((existing) => existing.id !== card.id)
-    return [...others, card]
-  })
-}
-
-export function forgetCard(queryClient: QueryClient, id: string): void {
-  queryClient.setQueryData<CardDto[]>(CARDS_QUERY_KEY, (cards = []) => cards.filter((card) => card.id !== id))
+/** Whether this device has completed at least one pull from the server. */
+export function useHasSynced(): boolean | undefined {
+  return useLiveQuery(async () => (await db.meta.get('cursor')) !== undefined, [])
 }

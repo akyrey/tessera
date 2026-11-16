@@ -290,6 +290,8 @@ pub async fn complete_registration(
             let user = new_user(pending, false, now);
             repo::insert_user(&mut *tx, &user).await?;
             repo::add_member(&mut *tx, household_id, user.id, Role::Member, now).await?;
+            // Shared cards become visible to the new member: wake up their sync.
+            crate::cards::repo::next_change_seq(&mut *tx).await?;
             user
         }
         InviteKind::Recovery => {

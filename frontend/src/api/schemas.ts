@@ -2,6 +2,7 @@ import { z } from 'zod'
 import type { BarcodeFormat } from './generated/BarcodeFormat'
 import type { CardDto } from './generated/CardDto'
 import type { CeremonyStart } from './generated/CeremonyStart'
+import type { ChangesDto } from './generated/ChangesDto'
 import type { ImageCreated } from './generated/ImageCreated'
 import type { HouseholdDto } from './generated/HouseholdDto'
 import type { InviteCreated } from './generated/InviteCreated'
@@ -97,3 +98,8 @@ export const cardSchema = z.object({
 }) satisfies z.ZodType<CardDto>
 
 export const imageCreatedSchema = z.object({ id: z.string() }) satisfies z.ZodType<ImageCreated>
+
+export const changesSchema = z.object({
+  cursor: z.number(),
+  cards: z.array(cardSchema).nullable(),
+}) satisfies z.ZodType<ChangesDto>

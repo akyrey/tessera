@@ -1,21 +1,21 @@
 import { useId, useState } from 'react'
-import { imageUrl } from '../../api/cards'
 import { Button } from '../../components/Button'
 import { KEEP_PHOTO, type PhotoChange } from './photoChange'
 import { PhotoError, preparePhoto, toDataUrl } from './photos'
 
 interface PhotoFieldProps {
   readonly label: string
-  readonly currentImageId: string | null
+  /** What is stored now (server or unsynced local photo). */
+  readonly currentSrc: string | null
   readonly change: PhotoChange
   readonly onChange: (change: PhotoChange) => void
 }
 
-export function PhotoField({ label, currentImageId, change, onChange }: PhotoFieldProps) {
+export function PhotoField({ label, currentSrc, change, onChange }: PhotoFieldProps) {
   const inputId = useId()
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const preview = previewOf(change, currentImageId)
+  const preview = previewOf(change, currentSrc)
 
   const pick = async (file: File | undefined) => {
     if (!file) return
@@ -60,7 +60,7 @@ export function PhotoField({ label, currentImageId, change, onChange }: PhotoFie
           <Button
             variant="secondary"
             onClick={() =>
-              onChange(change.type === 'replace' || !currentImageId ? KEEP_PHOTO : { type: 'remove' })
+              onChange(change.type === 'replace' || !currentSrc ? KEEP_PHOTO : { type: 'remove' })
             }
           >
             Remove
@@ -77,8 +77,7 @@ export function PhotoField({ label, currentImageId, change, onChange }: PhotoFie
 }
 
 /** URL to show for the field: the new photo, the stored one, or none. */
-function previewOf(change: PhotoChange, currentImageId: string | null): string | null {
+function previewOf(change: PhotoChange, currentSrc: string | null): string | null {
   if (change.type === 'replace') return change.preview
-  if (change.type === 'remove' || !currentImageId) return null
-  return imageUrl(currentImageId)
+  return change.type === 'remove' ? null : currentSrc
 }

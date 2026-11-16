@@ -8,7 +8,9 @@ use uuid::Uuid;
 
 use super::barcode::BarcodeFormat;
 use super::images::ImageMime;
-use super::model::{CardAccess, CardDto, CardFields, CardInput, ImageKind, StoredImage};
+use super::model::{
+    CardAccess, CardDto, CardFields, CardInput, ChangesDto, ImageKind, StoredImage,
+};
 use super::policy::{self, Ownership, Viewer};
 use super::repo;
 use crate::accounts::model::User;
@@ -33,6 +35,25 @@ pub async fn viewer_of(pool: &SqlitePool, user: &User) -> Result<Viewer, ApiErro
 
 pub async fn list_cards(pool: &SqlitePool, viewer: Viewer) -> Result<Vec<CardDto>, ApiError> {
     Ok(repo::list_visible(pool, viewer.user_id, viewer.household_id).await?)
+}
+
+/// Pull sync. With a handful of users and cards a full snapshot is cheaper and
+/// simpler than deltas, and it naturally removes deleted or unshared cards.
+pub async fn changes_since(
+    pool: &SqlitePool,
+    viewer: Viewer,
+    since: i64,
+) -> Result<ChangesDto, ApiError> {
+    // One read transaction: the cursor and the snapshot come from the same state.
+    let mut tx = pool.begin().await?;
+    let cursor = repo::current_change_seq(&mut *tx).await?;
+    let cards = if since == cursor {
+        None
+    } else {
+        Some(repo::list_visible(&mut *tx, viewer.user_id, viewer.household_id).await?)
+    };
+    tx.commit().await?;
+    Ok(ChangesDto { cursor, cards })
 }
 
 /// Idempotent create-or-replace: the client picks the id (UUIDv7), so a retried

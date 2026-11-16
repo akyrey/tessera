@@ -560,3 +560,83 @@ async fn photo_storage_is_capped_per_owner() {
         .await;
     assert_eq!(response.status(), StatusCode::OK);
 }
+
+// ---------- pull sync ----------
+
+async fn changes(app: &TestApp, session: &str, since: i64) -> Value {
+    let response = app
+        .get(&format!("/api/changes?since={since}"), Some(session))
+        .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    json(response).await
+}
+
+#[tokio::test]
+async fn changes_return_a_snapshot_only_when_something_changed() {
+    let app = spawn_app().await;
+    let (_, session) = app.bootstrap_admin("Alice").await;
+    let id = create_card(&app, &session).await;
+
+    let first = changes(&app, &session, 0).await;
+    let cursor = first["cursor"].as_i64().unwrap();
+    assert_eq!(first["cards"][0]["id"], id.to_string());
+
+    let unchanged = changes(&app, &session, cursor).await;
+    assert_eq!(unchanged, json!({ "cursor": cursor, "cards": null }));
+
+    app.delete(&card_uri(id), Some(&session)).await;
+    let after_delete = changes(&app, &session, cursor).await;
+    assert!(after_delete["cursor"].as_i64().unwrap() > cursor);
+    assert_eq!(after_delete["cards"], json!([]));
+}
+
+#[tokio::test]
+async fn changes_only_contain_visible_cards() {
+    let app = spawn_app().await;
+    let (alice, alice_session) = app.bootstrap_admin("Alice").await;
+    let (_, bea_session) = app.add_member(&alice, "Bea").await;
+    let private = create_card(&app, &alice_session).await;
+    let shared = create_card(&app, &alice_session).await;
+    share_with_household(&app, shared).await;
+
+    let snapshot = changes(&app, &bea_session, 0).await;
+
+    let ids: Vec<_> = snapshot["cards"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|c| c["id"].clone())
+        .collect();
+    assert_eq!(ids, [json!(shared.to_string())]);
+    assert_ne!(ids, [json!(private.to_string())]);
+}
+
+#[tokio::test]
+async fn joining_a_household_advances_the_cursor() {
+    let app = spawn_app().await;
+    let (alice, session) = app.bootstrap_admin("Alice").await;
+    let cursor = changes(&app, &session, 0).await["cursor"].as_i64().unwrap();
+
+    app.add_member(&alice, "Bea").await;
+
+    assert!(
+        changes(&app, &session, cursor).await["cursor"]
+            .as_i64()
+            .unwrap()
+            > cursor
+    );
+}
+
+#[tokio::test]
+async fn changes_validate_the_cursor_and_require_a_session() {
+    let app = spawn_app().await;
+    let (_, session) = app.bootstrap_admin("Alice").await;
+
+    let response = app.get("/api/changes?since=abc", Some(&session)).await;
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(error_code(response).await, "invalid_request");
+    assert_eq!(
+        app.get("/api/changes", None).await.status(),
+        StatusCode::UNAUTHORIZED
+    );
+}

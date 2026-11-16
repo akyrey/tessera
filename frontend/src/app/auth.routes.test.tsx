@@ -21,7 +21,7 @@ vi.mock('../features/auth/webauthn', async (importOriginal) => ({
 beforeEach(() => {
   vi.mocked(meta.fetchAppInfo).mockResolvedValue({ name: 'tessera', version: '0.1.0' })
   vi.mocked(webauthn.supportsPasskeys).mockReturnValue(true)
-  vi.mocked(cards.listCards).mockResolvedValue([])
+  vi.mocked(cards.fetchChanges).mockResolvedValue({ cursor: 1, cards: [] })
 })
 
 describe('route guard', () => {
@@ -73,7 +73,6 @@ describe('sign in', () => {
 
     const { router, user } = renderRoute('/login')
     await user.click(await screen.findByRole('button', { name: 'Sign in with passkey' }))
-
     expect(await screen.findByRole('heading', { name: 'Cards' })).toBeInTheDocument()
     expect(webauthn.requestPasskey).toHaveBeenCalledWith(ceremony.options)
     expect(accounts.finishLogin).toHaveBeenCalledWith('c-1', { id: 'assertion' })

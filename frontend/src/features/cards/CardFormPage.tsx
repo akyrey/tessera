@@ -1,27 +1,27 @@
-import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { type FormEvent, type ReactNode, useState } from 'react'
-import { Link, useNavigate, useParams } from 'react-router'
-import { deleteCard } from '../../api/cards'
+import { type FormEvent, useState } from 'react'
+import { Link, useNavigate } from 'react-router'
 import type { BarcodeFormat } from '../../api/generated/BarcodeFormat'
-import type { CardDto } from '../../api/generated/CardDto'
+import type { CardInput } from '../../api/generated/CardInput'
+import type { ImageKind } from '../../api/generated/ImageKind'
 import { BARCODE_FORMATS } from '../../api/schemas'
 import { Alert } from '../../components/Alert'
 import { Button } from '../../components/Button'
 import { Screen } from '../../components/Screen'
-import { describeError } from '../auth/errors'
+import type { LocalCard } from '../../offline/db'
+import { enqueue } from '../../offline/syncEngine'
 import { useMe } from '../auth/useMe'
+import { ScanControls } from '../scan/ScanControls'
 import { CardStatus } from './CardStatus'
 import { ColorPicker } from './ColorPicker'
+import { Field, INPUT_CLASS } from './Field'
 import { PhotoField } from './PhotoField'
-import { KEEP_PHOTO } from './photoChange'
 import { FORMAT_INFO, checkCardNumber } from './barcodeFormats'
-import { type PhotoChanges, saveCardWithPhotos } from './saveCardWithPhotos'
-import { CARDS_QUERY_KEY, forgetCard, storeCard } from './useCards'
+import { KEEP_PHOTO, type PhotoChange } from './photoChange'
+import { photoSrc } from './photoSrc'
 import { useCardFromRoute } from './useCardFromRoute'
 import { uuidv7 } from './uuid'
 
-const INPUT =
-  'min-h-11 rounded-xl bg-white px-4 py-2 ring-1 ring-brand-900/15 focus:ring-2 focus:ring-brand-700 focus:outline-none'
+type PhotoChanges = Readonly<Record<ImageKind, PhotoChange>>
 
 export function NewCardPage() {
   const [id] = useState(uuidv7)
@@ -29,21 +29,19 @@ export function NewCardPage() {
 }
 
 export function EditCardPage() {
-  const { card, query } = useCardFromRoute()
-  const { id } = useParams()
-  if (!card || !id) return <CardStatus query={query} />
+  const { id, card, loading } = useCardFromRoute()
+  if (!card) return <CardStatus loading={loading} />
   // Keyed by id: moving to another card must not keep this card's form state.
   return <CardForm key={id} id={id} existing={card} />
 }
 
 interface CardFormProps {
   readonly id: string
-  readonly existing: CardDto | undefined
+  readonly existing: LocalCard | undefined
 }
 
 function CardForm({ id, existing }: CardFormProps) {
   const navigate = useNavigate()
-  const queryClient = useQueryClient()
   const [storeName, setStoreName] = useState(existing?.storeName ?? '')
   const [format, setFormat] = useState<BarcodeFormat>(existing?.barcodeFormat ?? 'ean13')
   const [number, setNumber] = useState(existing?.cardNumber ?? '')
@@ -52,38 +50,34 @@ function CardForm({ id, existing }: CardFormProps) {
   const [notes, setNotes] = useState(existing?.notes ?? '')
   const [photos, setPhotos] = useState<PhotoChanges>({ front: KEEP_PHOTO, back: KEEP_PHOTO })
   const [submitted, setSubmitted] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
 
   const numberCheck = checkCardNumber(format, number)
   const storeNameError = storeName.trim() === '' ? 'Store name is required' : null
   const numberError = numberCheck.ok ? null : numberCheck.message
 
-  const save = useMutation({
-    mutationFn: () =>
-      saveCardWithPhotos(
-        id,
-        {
-          storeName: storeName.trim(),
-          cardNumber: numberCheck.ok ? numberCheck.value : number,
-          barcodeFormat: format,
-          memberName: memberName.trim() || undefined,
-          color: color ?? undefined,
-          notes: notes.trim() || undefined,
-        },
-        photos,
-      ),
-    onSuccess: async (card) => {
-      storeCard(queryClient, card)
-      await navigate(`/cards/${card.id}`, { replace: true })
-    },
-    // The card may be saved even if a photo upload then failed.
-    onError: () => queryClient.invalidateQueries({ queryKey: CARDS_QUERY_KEY }),
-  })
-
-  const submit = (event: FormEvent) => {
+  const submit = async (event: FormEvent) => {
     event.preventDefault()
     setSubmitted(true)
-    if (storeNameError || numberError) return
-    save.mutate()
+    if (storeNameError || !numberCheck.ok) return
+    const input: CardInput = {
+      storeName: storeName.trim(),
+      cardNumber: numberCheck.value,
+      barcodeFormat: format,
+      memberName: memberName.trim() || undefined,
+      color: color ?? undefined,
+      notes: notes.trim() || undefined,
+    }
+    try {
+      // Saved on the device at once; the outbox sends it when there is network.
+      await enqueue(id, { type: 'save', input })
+      for (const kind of ['front', 'back'] as const) await queuePhoto(id, kind, photos[kind])
+    } catch (error) {
+      console.error('Saving on this device failed', error)
+      setSaveError('This card could not be saved on this device. Check the free storage and try again.')
+      return
+    }
+    await navigate(`/cards/${id}`, { replace: true })
   }
 
   return (
@@ -94,12 +88,18 @@ function CardForm({ id, existing }: CardFormProps) {
           Cancel
         </Link>
       </header>
-      <form noValidate onSubmit={submit} className="flex flex-col gap-5">
+      <form noValidate onSubmit={(event) => void submit(event)} className="flex flex-col gap-5">
+        <ScanControls
+          onScanned={(scannedFormat, text) => {
+            setFormat(scannedFormat)
+            setNumber(text)
+          }}
+        />
         <Field label="Store name" error={submitted ? storeNameError : null}>
           {(props) => (
             <input
               {...props}
-              className={INPUT}
+              className={INPUT_CLASS}
               value={storeName}
               autoComplete="off"
               maxLength={64}
@@ -111,7 +111,7 @@ function CardForm({ id, existing }: CardFormProps) {
           {(props) => (
             <select
               {...props}
-              className={INPUT}
+              className={INPUT_CLASS}
               value={format}
               onChange={(e) => setFormat(e.target.value as BarcodeFormat)}
             >
@@ -127,7 +127,7 @@ function CardForm({ id, existing }: CardFormProps) {
           {(props) => (
             <input
               {...props}
-              className={`${INPUT} font-mono`}
+              className={`${INPUT_CLASS} font-mono`}
               value={number}
               inputMode={FORMAT_INFO[format].inputMode}
               autoComplete="off"
@@ -141,7 +141,7 @@ function CardForm({ id, existing }: CardFormProps) {
           {(props) => (
             <input
               {...props}
-              className={INPUT}
+              className={INPUT_CLASS}
               value={memberName}
               maxLength={64}
               onChange={(e) => setMemberName(e.target.value)}
@@ -153,7 +153,7 @@ function CardForm({ id, existing }: CardFormProps) {
           {(props) => (
             <textarea
               {...props}
-              className={`${INPUT} min-h-24`}
+              className={`${INPUT_CLASS} min-h-24`}
               value={notes}
               maxLength={1000}
               onChange={(e) => setNotes(e.target.value)}
@@ -162,75 +162,56 @@ function CardForm({ id, existing }: CardFormProps) {
         </Field>
         <PhotoField
           label="Front"
-          currentImageId={existing?.frontImageId ?? null}
+          currentSrc={existing ? photoSrc(existing, 'front') : null}
           change={photos.front}
           onChange={(front) => setPhotos((current) => ({ ...current, front }))}
         />
         <PhotoField
           label="Back"
-          currentImageId={existing?.backImageId ?? null}
+          currentSrc={existing ? photoSrc(existing, 'back') : null}
           change={photos.back}
           onChange={(back) => setPhotos((current) => ({ ...current, back }))}
         />
-        {save.isError && <Alert>{describeError(save.error)}</Alert>}
-        <Button type="submit" busy={save.isPending}>
-          Save card
-        </Button>
+        {saveError && <Alert>{saveError}</Alert>}
+        <Button type="submit">Save card</Button>
       </form>
-      {existing && <DeleteCard card={existing} onDeleted={() => forgetCard(queryClient, existing.id)} />}
+      {existing && <DeleteCard card={existing} />}
     </Screen>
   )
 }
 
-interface FieldProps {
-  readonly label: string
-  readonly error?: string | null
-  readonly children: (props: {
-    id: string
-    'aria-invalid'?: boolean
-    'aria-describedby'?: string
-  }) => ReactNode
+function queuePhoto(cardId: string, kind: ImageKind, change: PhotoChange): Promise<void> {
+  switch (change.type) {
+    case 'keep':
+      return Promise.resolve()
+    case 'remove':
+      return enqueue(cardId, { type: 'photo', kind, photo: null, preview: null })
+    case 'replace':
+      return change.photo.arrayBuffer().then((bytes) =>
+        enqueue(cardId, {
+          type: 'photo',
+          kind,
+          photo: { bytes, mime: change.photo.type },
+          preview: change.preview,
+        }),
+      )
+  }
 }
 
-function Field({ label, error, children }: FieldProps) {
-  const id = `field-${label.toLowerCase().replace(/\W+/g, '-')}`
-  const errorId = `${id}-error`
-  return (
-    <div className="flex flex-col gap-1">
-      <label htmlFor={id} className="font-medium">
-        {label}
-      </label>
-      {children({ id, ...(error ? { 'aria-invalid': true, 'aria-describedby': errorId } : {}) })}
-      {error && (
-        <p id={errorId} className="text-sm text-red-700">
-          {error}
-        </p>
-      )}
-    </div>
-  )
-}
-
-function DeleteCard({ card, onDeleted }: { readonly card: CardDto; readonly onDeleted: () => void }) {
+function DeleteCard({ card }: { readonly card: LocalCard }) {
   const navigate = useNavigate()
   const me = useMe().data
   const [confirming, setConfirming] = useState(false)
-  const remove = useMutation({
-    mutationFn: () => deleteCard(card.id),
-    onSuccess: async () => {
-      onDeleted()
-      await navigate('/', { replace: true })
-    },
-  })
   if (me?.user.id !== card.ownerId) return null
+
+  const remove = async () => {
+    await enqueue(card.id, { type: 'delete' })
+    await navigate('/', { replace: true })
+  }
 
   return (
     <div className="flex flex-col gap-2 border-t border-brand-900/10 pt-5">
-      {remove.isError && <Alert>{describeError(remove.error)}</Alert>}
-      <Button
-        variant="danger"
-        busy={remove.isPending}
-        onClick={() => (confirming ? remove.mutate() : setConfirming(true))}
-      >
+      <Button variant="danger" onClick={() => (confirming ? void remove() : setConfirming(true))}>
         {confirming ? 'Tap again to delete for good' : 'Delete card'}
       </Button>
     </div>

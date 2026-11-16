@@ -1,8 +1,12 @@
 import { type Page, type Route, expect, test } from '@playwright/test'
+import bwipjs from 'bwip-js'
 
 // Runs on both engines. WebKit cannot sign in with a virtual passkey, so the
 // JSON API is stubbed here; pages, assets and the CSP still come from the Rust
 // server. The full stack is covered by passkeys.spec.ts on Chromium.
+
+// Requests answered through a service worker bypass `page.route` stubs.
+test.use({ serviceWorkers: 'block' })
 
 const ME = {
   user: { id: 'u-1', displayName: 'Alice', isAdmin: true },
@@ -39,7 +43,8 @@ const json = (route: Route, body: unknown) => route.fulfill({ json: body })
 async function stubApi(page: Page, uploads: string[] = []) {
   const stored = [...CARDS]
   await page.route('**/api/me', (route) => json(route, ME))
-  await page.route('**/api/cards', (route) => json(route, stored))
+  let cursor = 1
+  await page.route('**/api/changes*', (route) => json(route, { cursor, cards: stored }))
   await page.route('**/api/cards/*/use', (route) => route.fulfill({ status: 204 }))
   await page.route('**/api/cards/*/images/*', (route) => {
     uploads.push(route.request().headers()['content-type'] ?? '')
@@ -50,6 +55,7 @@ async function stubApi(page: Page, uploads: string[] = []) {
     const id = new URL(route.request().url()).pathname.split('/').at(-1) ?? ''
     const saved = card(id, body.storeName ?? '', body.barcodeFormat ?? '', body.cardNumber ?? '')
     stored.push(saved)
+    cursor += 1
     return json(route, saved)
   })
 }
@@ -57,7 +63,10 @@ async function stubApi(page: Page, uploads: string[] = []) {
 function collectConsoleErrors(page: Page): string[] {
   const errors: string[] = []
   page.on('console', (message) => {
-    if (message.type() === 'error') errors.push(message.text())
+    // Service workers are blocked in this spec, so registration fails on purpose.
+    if (message.type() === 'error' && !message.text().startsWith('Service worker registration failed')) {
+      errors.push(message.text())
+    }
   })
   return errors
 }
@@ -107,4 +116,24 @@ test('re-encodes a picked photo in a format the server accepts', async ({ page }
   // WebP where the engine can encode it, JPEG otherwise (Safari).
   expect(uploads).toHaveLength(1)
   expect(['image/webp', 'image/jpeg']).toContain(uploads[0])
+})
+
+test('fills the form by scanning a photo of a barcode', async ({ page }) => {
+  await stubApi(page)
+  // A real EAN-13 rendered as PNG, like a photo or screenshot of the card.
+  const png = await bwipjs.toBuffer({
+    bcid: 'ean13',
+    text: '4006381333931',
+    scale: 3,
+    height: 20,
+    paddingwidth: 20,
+  })
+
+  await page.goto('/cards/new')
+  await page
+    .getByLabel('Barcode photo')
+    .setInputFiles({ name: 'card.png', mimeType: 'image/png', buffer: png })
+
+  await expect(page.getByLabel('Card number')).toHaveValue('4006381333931')
+  await expect(page.getByLabel('Barcode type')).toHaveValue('ean13')
 })

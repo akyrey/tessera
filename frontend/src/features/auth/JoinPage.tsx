@@ -10,7 +10,7 @@ import { Screen } from '../../components/Screen'
 import { FullPageSpinner } from '../../components/Spinner'
 import { guessDeviceName } from './deviceName'
 import { describeError } from './errors'
-import { ME_QUERY_KEY } from './useMe'
+import { signedIn } from './useMe'
 import { createPasskey } from './webauthn'
 
 const MAX_NAME_LENGTH = 64
@@ -65,9 +65,9 @@ function RegistrationForm({ token, invite }: { readonly token: string; readonly 
       const credential = await createPasskey(ceremony.options)
       return finishRegistration(ceremony.ceremonyId, credential, guessDeviceName())
     },
-    onSuccess: (me) => {
-      queryClient.setQueryData(ME_QUERY_KEY, me)
-      void navigate('/', { replace: true })
+    onSuccess: async (me) => {
+      await signedIn(queryClient, me)
+      await navigate('/', { replace: true })
     },
   })
 

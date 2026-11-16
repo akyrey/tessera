@@ -8,7 +8,7 @@ import { Screen } from '../../components/Screen'
 import { ServerStatusBadge } from '../status/ServerStatusBadge'
 import { useServerStatus } from '../status/useServerStatus'
 import { describeError } from './errors'
-import { ME_QUERY_KEY, useMe } from './useMe'
+import { signedIn, useMe } from './useMe'
 import { requestPasskey, supportsPasskeys } from './webauthn'
 
 export function LoginPage() {
@@ -23,9 +23,9 @@ export function LoginPage() {
       const credential = await requestPasskey(ceremony.options)
       return finishLogin(ceremony.ceremonyId, credential)
     },
-    onSuccess: (user) => {
-      queryClient.setQueryData(ME_QUERY_KEY, user)
-      void navigate('/', { replace: true })
+    onSuccess: async (user) => {
+      await signedIn(queryClient, user)
+      await navigate('/', { replace: true })
     },
   })
 

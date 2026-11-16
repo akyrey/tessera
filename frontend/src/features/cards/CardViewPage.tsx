@@ -1,32 +1,24 @@
-import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useRef } from 'react'
 import { Link } from 'react-router'
-import { imageUrl, recordUse, setFavorite } from '../../api/cards'
-import type { CardDto } from '../../api/generated/CardDto'
-import { Alert } from '../../components/Alert'
-import { describeError } from '../auth/errors'
+import type { LocalCard } from '../../offline/db'
+import { enqueue } from '../../offline/syncEngine'
 import { Barcode } from './Barcode'
 import { CardStatus } from './CardStatus'
 import { cardColor, textOn } from './cardColors'
-import { CARDS_QUERY_KEY, storeCard } from './useCards'
 import { useCardFromRoute } from './useCardFromRoute'
 import { useWakeLock } from './useWakeLock'
+import { photoSrc } from './photoSrc'
 
 export function CardViewPage() {
-  const { card, query } = useCardFromRoute()
-  if (!card) return <CardStatus query={query} />
+  const { card, loading } = useCardFromRoute()
+  if (!card) return <CardStatus loading={loading} />
   return <CardView card={card} />
 }
 
-function CardView({ card }: { readonly card: CardDto }) {
-  const queryClient = useQueryClient()
+function CardView({ card }: { readonly card: LocalCard }) {
   useWakeLock()
   useRecordUse(card.id)
-
-  const favorite = useMutation({
-    mutationFn: () => setFavorite(card.id, !card.isFavorite),
-    onSuccess: (saved) => storeCard(queryClient, saved),
-  })
+  const toggleFavorite = () => void enqueue(card.id, { type: 'favorite', isFavorite: !card.isFavorite })
   const background = cardColor(card)
   const foreground = textOn(background)
 
@@ -45,8 +37,7 @@ function CardView({ card }: { readonly card: CardDto }) {
               type="button"
               aria-pressed={card.isFavorite}
               aria-label="Favourite"
-              disabled={favorite.isPending}
-              onClick={() => favorite.mutate()}
+              onClick={toggleFavorite}
               className="min-h-11 min-w-11 rounded-xl text-2xl"
             >
               {card.isFavorite ? '★' : '☆'}
@@ -68,38 +59,25 @@ function CardView({ card }: { readonly card: CardDto }) {
       </section>
 
       <div className="flex flex-col gap-4 px-4">
-        {favorite.isError && <Alert>{describeError(favorite.error)}</Alert>}
         {card.notes && <p className="whitespace-pre-line text-brand-900/80">{card.notes}</p>}
-        <Photo label="Front of the card" imageId={card.frontImageId} />
-        <Photo label="Back of the card" imageId={card.backImageId} />
+        <Photo label="Front of the card" src={photoSrc(card, 'front')} />
+        <Photo label="Back of the card" src={photoSrc(card, 'back')} />
       </div>
     </main>
   )
 }
 
-function Photo({ label, imageId }: { readonly label: string; readonly imageId: string | null }) {
-  if (!imageId) return null
-  return (
-    <img
-      src={imageUrl(imageId)}
-      alt={label}
-      loading="lazy"
-      className="w-full rounded-2xl ring-1 ring-black/10"
-    />
-  )
+function Photo({ label, src }: { readonly label: string; readonly src: string | null }) {
+  if (!src) return null
+  return <img src={src} alt={label} loading="lazy" className="w-full rounded-2xl ring-1 ring-black/10" />
 }
 
 /** Counts one use per card opening (also under StrictMode's double effects). */
 function useRecordUse(cardId: string): void {
-  const queryClient = useQueryClient()
   const recorded = useRef<string | null>(null)
   useEffect(() => {
     if (recorded.current === cardId) return
     recorded.current = cardId
-    recordUse(cardId)
-      .then(() => queryClient.invalidateQueries({ queryKey: CARDS_QUERY_KEY }))
-      .catch(() => {
-        // Usage only orders the list; never interrupt showing the card for it.
-      })
-  }, [cardId, queryClient])
+    void enqueue(cardId, { type: 'use', at: Math.floor(Date.now() / 1000) })
+  }, [cardId])
 }

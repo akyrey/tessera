@@ -108,7 +108,7 @@ The sync cursor is the last `change_seq` the client has seen.
 | `POST /api/auth/logout` · `GET /api/me` | Session |
 | `GET/POST/DELETE /api/me/passkeys` | Add a second device, revoke a passkey |
 | `GET /api/household` · `POST /api/household/invites` | Members, create an invite link |
-| `GET /api/changes?since=` | Pull sync |
+| `GET /api/changes?since=` | Pull sync: cursor + full snapshot of visible cards, or `null` when unchanged |
 | `GET /api/cards` | Cards visible to me, with my favourite/usage and photo ids (M2; superseded by `/api/changes` for offline use in M3) |
 | `PUT /api/cards/{id}` · `DELETE /api/cards/{id}` | Idempotent upsert (client-chosen UUIDv7) / soft delete leaving a tombstone |
 | `PUT /api/cards/{id}/prefs` · `POST /api/cards/{id}/use` | Per-user favourite; usage bump for "recently used" |
@@ -230,11 +230,26 @@ Each milestone is test-first and ends with something usable on a phone.
   browser cache after deletion (`private, immutable`), accepted for personal phones; uploads are checked by magic
   bytes, not fully decoded.
 
-### M3 — Scanning & offline
+### M3 — Scanning & offline ✅
 - Camera scan with `zxing-wasm`, plus scan from an imported photo or screenshot.
 - Dexie store, outbox, `/api/changes` pull sync, service worker caches the app shell and images.
 - Offline indicator, retry with backoff, clear error messages.
 - **Done when:** in airplane mode I can open and show every card, and edits sync after reconnecting.
+- *As built:* `GET /api/changes?since=` returns the cursor plus either `null` (nothing changed) or a **full snapshot**
+  of visible cards: with two users this is smaller and simpler than deltas, and deletions/unsharing need no extra
+  bookkeeping. Joining a household bumps the cursor. The UI reads only IndexedDB (Dexie); every edit is applied
+  locally and queued in an outbox (repeated saves coalesce, a delete drops pending edits). The engine flushes the
+  outbox, then pulls, keeping local versions of cards with unsent changes. Network and 5xx errors retry with
+  backoff (2 s → 1 min) and on `online`/visibility; refused changes (4xx) are dropped and shown once; 401 re-checks
+  the session. The signed-in user is cached for offline starts; signing out, an expired session or another account
+  wipes the device copy. Photos are queued as bytes (Safari private mode cannot store Blobs in IndexedDB) and
+  previewed from a local `data:` URL until synced; the service worker caches `/api/images/*` (cache-first, ids are
+  immutable) and precaches the app shell, bwip-js and the scanner WASM.
+  Scanning: `zxing-wasm` reader with the WASM self-hosted (the default CDN is blocked by the CSP); images are decoded
+  by the browser onto white first (HEIC photos, transparent screenshots). Camera scanning reads 4 frames/s.
+  E2E: offline reload, offline edit and sync-after-reconnect on Chromium; scan-from-photo and offline app shell on
+  both engines. Found on the way: a duplicate precache entry silently disabled the service worker, and a late
+  "signed out" answer could overwrite a fresh sign-in (now cancelled).
 
 ### M4 — Sharing
 - "Share with household" toggle on a card, owner-only unshare/delete.

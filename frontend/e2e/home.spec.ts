@@ -43,3 +43,19 @@ test('the app is installable: manifest and service worker are served', async ({ 
   )
   expect(registration).toMatch(/\/sw\.js$/)
 })
+
+test('the app shell opens without network once installed', async ({ page, context }) => {
+  await page.goto('/login')
+  await page.evaluate(async () => {
+    await navigator.serviceWorker.ready
+  })
+  // Precaching finishes during install; a broken precache list fails here.
+  await expect
+    .poll(() => page.evaluate(async () => (await caches.keys()).some((name) => name.includes('precache'))))
+    .toBe(true)
+
+  await context.setOffline(true)
+  await page.reload()
+
+  await expect(page.getByRole('heading', { name: 'Tessera' })).toBeVisible()
+})

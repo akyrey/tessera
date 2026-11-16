@@ -28,12 +28,36 @@ export default defineConfig({
         scope: '/',
       },
       workbox: {
+        // Take control of the page that installed the worker, so it works offline right away.
+        clientsClaim: true,
+        skipWaiting: true,
+        // The barcode scanner's WASM must work offline too.
+        // (The manifest and icons are added by the plugin itself; listing them twice breaks precaching.)
+        globPatterns: ['**/*.{js,css,html,wasm}'],
+        maximumFileSizeToCacheInBytes: 4 * 1024 * 1024,
+        runtimeCaching: [
+          {
+            // Photo ids change on every replacement, so a cached photo never goes stale.
+            urlPattern: ({ url }) => url.pathname.startsWith('/api/images/'),
+            handler: 'CacheFirst',
+            options: {
+              cacheName: 'card-photos',
+              expiration: { maxEntries: 1000 },
+              cacheableResponse: { statuses: [200] },
+            },
+          },
+        ],
         navigateFallback: '/index.html',
         // Probes and the API must always hit the network.
         navigateFallbackDenylist: [/^\/api\//, /^\/healthz$/, /^\/readyz$/],
       },
     }),
   ],
+  build: {
+    // bwip-js (barcodes) and the app chunk are large but load once and are precached
+    // by the service worker; route-level splitting would not help an offline-first PWA.
+    chunkSizeWarningLimit: 1024,
+  },
   server: {
     proxy: {
       '/api': BACKEND_URL,

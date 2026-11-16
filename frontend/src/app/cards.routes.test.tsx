@@ -3,7 +3,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import * as accounts from '../api/accounts'
 import * as cards from '../api/cards'
 import { ApiError } from '../api/client'
+import type { CardDto } from '../api/generated/CardDto'
 import * as photos from '../features/cards/photos'
+import * as zxing from '../features/scan/zxing'
+import { db, writeMeta } from '../offline/db'
+import { whenIdle } from '../offline/syncEngine'
 import { card, member, owner } from '../test/fixtures'
 import { renderRoute } from '../test/renderRoute'
 
@@ -12,6 +16,10 @@ vi.mock('../api/cards')
 vi.mock('../features/cards/photos', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../features/cards/photos')>()),
   preparePhoto: vi.fn(),
+}))
+vi.mock('../features/scan/zxing', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../features/scan/zxing')>()),
+  scanImage: vi.fn(),
 }))
 
 const esselunga = card({ id: 'c-esse', storeName: 'Esselunga', memberName: 'Alice' })
@@ -23,12 +31,18 @@ const coop = card({
   isFavorite: true,
 })
 const decathlon = card({ id: 'c-deca', storeName: 'Decathlon', lastUsedAt: 1_800_000_500 })
+const offline = () => new ApiError(0, 'network_error', 'Cannot reach the server')
+
+/** What the server returns on the next pulls. */
+function serverHas(...serverCards: CardDto[]) {
+  vi.mocked(cards.fetchChanges).mockResolvedValue({ cursor: 1, cards: serverCards })
+}
 
 beforeEach(() => {
   vi.mocked(accounts.fetchMe).mockResolvedValue(owner)
-  vi.mocked(cards.listCards).mockResolvedValue([esselunga, coop, decathlon])
-  vi.mocked(cards.recordUse).mockResolvedValue()
   vi.mocked(cards.imageUrl).mockImplementation((id) => `/api/images/${id}`)
+  vi.mocked(cards.saveCard).mockImplementation(async (id) => card({ id }))
+  serverHas(esselunga, coop, decathlon)
 })
 
 const section = (name: string) => within(screen.getByRole('region', { name }))
@@ -61,7 +75,7 @@ describe('card list', () => {
   })
 
   it('invites to add the first card', async () => {
-    vi.mocked(cards.listCards).mockResolvedValue([])
+    serverHas()
 
     renderRoute('/')
 
@@ -69,14 +83,34 @@ describe('card list', () => {
     expect(screen.getByRole('link', { name: 'Add card' })).toHaveAttribute('href', '/cards/new')
   })
 
-  it('offers a retry when loading fails', async () => {
-    vi.mocked(cards.listCards).mockRejectedValueOnce(new ApiError(0, 'network_error', 'offline'))
+  it('shows the cards saved on the device when offline', async () => {
+    await db.cards.bulkPut([esselunga, coop])
+    await writeMeta('cursor', 1)
+    vi.mocked(cards.fetchChanges).mockRejectedValue(offline())
+
+    renderRoute('/')
+
+    expect(await screen.findByText(/Offline: showing the cards saved on this device/)).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: /Esselunga/ })).toBeInTheDocument()
+  })
+
+  it('keeps waiting for the first sync instead of claiming the wallet is empty', async () => {
+    vi.mocked(cards.fetchChanges).mockRejectedValue(offline())
+
+    renderRoute('/')
+
+    expect(await screen.findByText('Loading cards…')).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'No cards yet' })).not.toBeInTheDocument()
+  })
+
+  it('reports changes the server refused until dismissed', async () => {
+    await writeMeta('problems', ['Changes to Coop could not be saved: store name is too long'])
 
     const { user } = renderRoute('/')
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('Cannot reach the server')
-    await user.click(screen.getByRole('button', { name: 'Try again' }))
-    expect(await screen.findByRole('region', { name: 'Favourites' })).toBeInTheDocument()
+    expect(await screen.findByRole('alert')).toHaveTextContent('store name is too long')
+    await user.click(screen.getByRole('button', { name: 'Dismiss' }))
+    await waitFor(() => expect(screen.queryByRole('alert')).not.toBeInTheDocument())
   })
 })
 
@@ -87,14 +121,12 @@ describe('card view', () => {
     expect(await screen.findByRole('heading', { name: 'Esselunga' })).toBeInTheDocument()
     expect(await screen.findByRole('img', { name: /EAN-13/ })).toBeInTheDocument()
     expect(screen.getByText('4006381333931')).toBeInTheDocument()
-    await waitFor(() => expect(cards.recordUse).toHaveBeenCalledTimes(1))
-    expect(cards.recordUse).toHaveBeenCalledWith('c-esse')
+    await waitFor(() => expect(cards.recordUse).toHaveBeenCalledWith('c-esse'))
+    expect(cards.recordUse).toHaveBeenCalledTimes(1)
   })
 
   it('shows photos and notes', async () => {
-    vi.mocked(cards.listCards).mockResolvedValue([
-      { ...esselunga, frontImageId: 'img-f', notes: 'Tessera fedeltà' },
-    ])
+    serverHas({ ...esselunga, frontImageId: 'img-f', notes: 'Tessera fedeltà' })
 
     renderRoute('/cards/c-esse')
 
@@ -105,31 +137,20 @@ describe('card view', () => {
     expect(screen.getByText('Tessera fedeltà')).toBeInTheDocument()
   })
 
-  it('toggles the favourite', async () => {
-    vi.mocked(cards.setFavorite).mockResolvedValue({ ...esselunga, isFavorite: true })
-
+  it('toggles the favourite at once and syncs it', async () => {
     const { user } = renderRoute('/cards/c-esse')
     const star = await screen.findByRole('button', { name: 'Favourite' })
     expect(star).toHaveAttribute('aria-pressed', 'false')
     await user.click(star)
 
-    expect(cards.setFavorite).toHaveBeenCalledWith('c-esse', true)
     await waitFor(() => expect(star).toHaveAttribute('aria-pressed', 'true'))
+    await waitFor(() => expect(cards.setFavorite).toHaveBeenCalledWith('c-esse', true))
   })
 
   it('reports cards that do not exist', async () => {
     renderRoute('/cards/missing')
 
     expect(await screen.findByText('This card does not exist or was deleted.')).toBeInTheDocument()
-  })
-
-  it('still shows the card when counting the use fails', async () => {
-    vi.mocked(cards.recordUse).mockRejectedValue(new ApiError(0, 'network_error', 'offline'))
-
-    renderRoute('/cards/c-esse')
-
-    expect(await screen.findByRole('heading', { name: 'Esselunga' })).toBeInTheDocument()
-    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
   })
 })
 
@@ -143,25 +164,15 @@ describe('new card', () => {
 
     expect(screen.getByText('Store name is required')).toBeInTheDocument()
     expect(screen.getByLabelText('Card number')).toHaveAttribute('aria-invalid', 'true')
-    expect(cards.saveCard).not.toHaveBeenCalled()
+    expect(await db.outbox.count()).toBe(0)
   })
 
-  it('saves a card with a photo and opens it', async () => {
+  it('saves a card with a photo, opens it and syncs it', async () => {
     const photo = new Blob(['x'], { type: 'image/webp' })
     vi.mocked(photos.preparePhoto).mockResolvedValue(photo)
-    const stored = [esselunga]
-    vi.mocked(cards.listCards).mockImplementation(async () => [...stored])
-    vi.mocked(cards.saveCard).mockImplementation(async (id, input) => {
-      const saved = card({
-        id,
-        storeName: input.storeName,
-        cardNumber: input.cardNumber,
-        barcodeFormat: input.barcodeFormat,
-      })
-      stored.push(saved)
-      return saved
-    })
     vi.mocked(cards.uploadImage).mockResolvedValue({ id: 'img-new' })
+    // The server does not know the card until the outbox has sent it.
+    vi.mocked(cards.fetchChanges).mockResolvedValue({ cursor: 1, cards: null })
 
     const { user, router } = renderRoute('/cards/new')
     await user.type(await screen.findByLabelText('Store name'), '  Bennet ')
@@ -179,6 +190,12 @@ describe('new card', () => {
     await user.click(screen.getByRole('button', { name: 'Save card' }))
 
     await waitFor(() => expect(router.state.location.pathname).toMatch(/^\/cards\/[0-9a-f-]{36}$/))
+    expect(await screen.findByRole('heading', { name: 'Bennet' })).toBeInTheDocument()
+    expect(screen.getByRole('img', { name: 'Front of the card' })).toHaveAttribute(
+      'src',
+      expect.stringMatching(/^data:/),
+    )
+    await waitFor(() => expect(cards.uploadImage).toHaveBeenCalled())
     const [id, input] = vi.mocked(cards.saveCard).mock.calls[0] ?? []
     expect(input).toEqual({
       storeName: 'Bennet',
@@ -188,23 +205,50 @@ describe('new card', () => {
       color: '#1d4ed8',
       notes: undefined,
     })
-    expect(cards.uploadImage).toHaveBeenCalledWith(id, 'front', photo)
-    expect(await screen.findByRole('heading', { name: 'Bennet' })).toBeInTheDocument()
+    expect(router.state.location.pathname).toBe(`/cards/${id}`)
   })
 
-  it('shows server errors and keeps the form', async () => {
-    vi.mocked(cards.saveCard).mockRejectedValue(
-      new ApiError(400, 'invalid_request', 'store name is too long'),
-    )
+  it('saves offline and keeps the change for later', async () => {
+    vi.mocked(cards.saveCard).mockRejectedValue(offline())
 
     const { user } = renderRoute('/cards/new')
-    await user.type(await screen.findByLabelText('Store name'), 'Coop')
+    await user.type(await screen.findByLabelText('Store name'), 'Coop Lombardia')
     await user.selectOptions(screen.getByLabelText('Barcode type'), 'none')
     await user.type(screen.getByLabelText('Card number'), '123')
     await user.click(screen.getByRole('button', { name: 'Save card' }))
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('Store name is too long')
-    expect(screen.getByLabelText('Store name')).toHaveValue('Coop')
+    expect(await screen.findByRole('heading', { name: 'Coop Lombardia' })).toBeInTheDocument()
+    await whenIdle()
+    expect(await db.outbox.count()).toBeGreaterThan(0)
+  })
+
+  it('fills the form from a scanned photo', async () => {
+    vi.mocked(zxing.scanImage).mockResolvedValue({
+      status: 'found',
+      format: 'qr',
+      text: 'https://x.example/1',
+    })
+
+    const { user } = renderRoute('/cards/new')
+    await user.upload(
+      await screen.findByLabelText('Barcode photo'),
+      new File(['img'], 'b.png', { type: 'image/png' }),
+    )
+
+    await waitFor(() => expect(screen.getByLabelText('Card number')).toHaveValue('https://x.example/1'))
+    expect(screen.getByLabelText('Barcode type')).toHaveValue('qr')
+  })
+
+  it('explains scans that find nothing usable', async () => {
+    vi.mocked(zxing.scanImage).mockResolvedValueOnce({ status: 'unsupported', formatName: 'MaxiCode' })
+    vi.mocked(zxing.scanImage).mockResolvedValueOnce({ status: 'none' })
+
+    const { user } = renderRoute('/cards/new')
+    const input = await screen.findByLabelText('Barcode photo')
+    await user.upload(input, new File(['img'], 'a.png', { type: 'image/png' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('MaxiCode')
+    await user.upload(input, new File(['img'], 'b.png', { type: 'image/png' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('No barcode found')
   })
 
   it('explains photos that cannot be used', async () => {
@@ -221,8 +265,23 @@ describe('new card', () => {
 })
 
 describe('edit card', () => {
+  it('is prefilled and can remove an existing photo', async () => {
+    serverHas({ ...esselunga, backImageId: 'img-b' })
+
+    const { user, router } = renderRoute('/cards/c-esse/edit')
+    expect(await screen.findByLabelText('Store name')).toHaveValue('Esselunga')
+    expect(screen.getByLabelText('Name on the card (optional)')).toHaveValue('Alice')
+    expect(screen.getByRole('img', { name: 'Back' })).toHaveAttribute('src', '/api/images/img-b')
+    await user.click(screen.getByRole('button', { name: 'Remove' }))
+    expect(screen.queryByRole('img', { name: 'Back' })).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Save card' }))
+
+    await waitFor(() => expect(router.state.location.pathname).toBe('/cards/c-esse'))
+    await waitFor(() => expect(cards.deleteImage).toHaveBeenCalledWith('c-esse', 'back'))
+  })
+
   it('discards a newly picked photo without deleting the stored one', async () => {
-    vi.mocked(cards.listCards).mockResolvedValue([{ ...esselunga, frontImageId: 'img-f' }])
+    serverHas({ ...esselunga, frontImageId: 'img-f' })
     vi.mocked(photos.preparePhoto).mockResolvedValue(new Blob(['x'], { type: 'image/webp' }))
 
     const { user } = renderRoute('/cards/c-esse/edit')
@@ -238,43 +297,14 @@ describe('edit card', () => {
     expect(screen.getByRole('img', { name: 'Front' })).toHaveAttribute('src', '/api/images/img-f')
   })
 
-  it('refreshes the list when saving fails part-way', async () => {
-    vi.mocked(cards.saveCard).mockRejectedValue(new ApiError(0, 'network_error', 'offline'))
-
-    const { user } = renderRoute('/cards/c-esse/edit')
-    await user.click(await screen.findByRole('button', { name: 'Save card' }))
-
-    expect(await screen.findByRole('alert')).toHaveTextContent('Cannot reach the server')
-    await waitFor(() => expect(cards.listCards).toHaveBeenCalledTimes(2))
-  })
-
-  it('is prefilled and can remove an existing photo', async () => {
-    vi.mocked(cards.listCards).mockResolvedValue([{ ...esselunga, backImageId: 'img-b' }])
-    vi.mocked(cards.saveCard).mockResolvedValue({ ...esselunga, backImageId: 'img-b' })
-    vi.mocked(cards.deleteImage).mockResolvedValue()
-
-    const { user, router } = renderRoute('/cards/c-esse/edit')
-    expect(await screen.findByLabelText('Store name')).toHaveValue('Esselunga')
-    expect(screen.getByLabelText('Name on the card (optional)')).toHaveValue('Alice')
-    expect(screen.getByRole('img', { name: 'Back' })).toHaveAttribute('src', '/api/images/img-b')
-    await user.click(screen.getByRole('button', { name: 'Remove' }))
-    expect(screen.queryByRole('img', { name: 'Back' })).not.toBeInTheDocument()
-    await user.click(screen.getByRole('button', { name: 'Save card' }))
-
-    await waitFor(() => expect(router.state.location.pathname).toBe('/cards/c-esse'))
-    expect(cards.deleteImage).toHaveBeenCalledWith('c-esse', 'back')
-  })
-
   it('deletes after a second confirmation tap', async () => {
-    vi.mocked(cards.deleteCard).mockResolvedValue()
-
     const { user, router } = renderRoute('/cards/c-esse/edit')
     await user.click(await screen.findByRole('button', { name: 'Delete card' }))
     expect(cards.deleteCard).not.toHaveBeenCalled()
     await user.click(screen.getByRole('button', { name: 'Tap again to delete for good' }))
 
     await waitFor(() => expect(router.state.location.pathname).toBe('/'))
-    expect(cards.deleteCard).toHaveBeenCalledWith('c-esse')
+    await waitFor(() => expect(cards.deleteCard).toHaveBeenCalledWith('c-esse'))
   })
 
   it('does not offer deletion to someone who does not own the card', async () => {
