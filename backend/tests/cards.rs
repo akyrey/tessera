@@ -718,3 +718,19 @@ async fn photos_of_shared_cards_are_visible_to_the_household() {
         StatusCode::OK
     );
 }
+
+#[tokio::test]
+async fn expiry_dates_round_trip_and_are_validated() {
+    let app = spawn_app().await;
+    let (_, session) = app.bootstrap_admin("Alice").await;
+    let id = Uuid::now_v7();
+    let mut body = card_body();
+    body["expiresOn"] = json!("2027-03-31");
+
+    let response = app.put(&card_uri(id), body.clone(), Some(&session)).await;
+    assert_eq!(json(response).await["expiresOn"], "2027-03-31");
+
+    body["expiresOn"] = json!("2027-02-30");
+    let response = app.put(&card_uri(id), body, Some(&session)).await;
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+}

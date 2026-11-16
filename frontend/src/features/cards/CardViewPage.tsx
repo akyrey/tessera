@@ -1,10 +1,11 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router'
 import type { LocalCard } from '../../offline/db'
 import { enqueue } from '../../offline/syncEngine'
 import { useMe } from '../auth/useMe'
 import { Barcode } from './Barcode'
 import { PlacesSection } from './PlacesSection'
+import { expiryLabel } from './expiry'
 import { CardStatus } from './CardStatus'
 import { cardColor, textOn } from './cardColors'
 import { useCardFromRoute } from './useCardFromRoute'
@@ -52,6 +53,7 @@ function CardView({ card }: { readonly card: LocalCard }) {
         <h1 className="text-3xl font-semibold break-words">{card.storeName}</h1>
         {card.memberName && <p className="opacity-80">{card.memberName}</p>}
         {card.shared && <SharedNote card={card} />}
+        {card.expiresOn && <ExpiryNote expiresOn={card.expiresOn} />}
       </header>
 
       <section aria-label="Barcode" className="flex flex-col items-center gap-4 px-4 py-8 text-black">
@@ -69,6 +71,11 @@ function CardView({ card }: { readonly card: LocalCard }) {
       </div>
     </main>
   )
+}
+
+function ExpiryNote({ expiresOn }: { readonly expiresOn: string }) {
+  const [today] = useState(() => new Date())
+  return <p className="text-sm font-medium">{expiryLabel(expiresOn, today)}</p>
 }
 
 function SharedNote({ card }: { readonly card: LocalCard }) {

@@ -17,4 +17,8 @@ brandId?: string,
 /**
  * Shops marked by hand; replaces the stored list.
  */
-places?: Array<Place>, };
+places?: Array<Place>, 
+/**
+ * Last valid day (`YYYY-MM-DD`), for coupons and vouchers.
+ */
+expiresOn?: string, };

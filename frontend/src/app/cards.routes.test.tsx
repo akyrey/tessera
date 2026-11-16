@@ -373,3 +373,34 @@ describe('sharing', () => {
     expect(await screen.findByRole('link', { name: /Esselunga.*Shared/ })).toBeInTheDocument()
   })
 })
+
+describe('expiry', () => {
+  const inDays = (days: number) => {
+    const date = new Date()
+    date.setDate(date.getDate() + days)
+    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+  }
+
+  it('lifts coupons about to expire and marks expired ones', async () => {
+    serverHas(
+      card({ id: 'soon', storeName: 'Buono Coop', expiresOn: inDays(2) }),
+      card({ id: 'gone', storeName: 'Old voucher', expiresOn: inDays(-1) }),
+    )
+
+    renderRoute('/')
+
+    const expiring = within(await screen.findByRole('region', { name: 'Expiring soon' }))
+    expect(expiring.getByRole('link', { name: /Buono Coop.*Expires in 2 days/ })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: /Old voucher.*Expired/ })).toBeInTheDocument()
+  })
+
+  it('saves an expiry date from the form', async () => {
+    const { user } = renderRoute('/cards/c-esse/edit')
+    await user.type(await screen.findByLabelText('Expires on (optional)'), '2030-01-31')
+    await user.click(screen.getByRole('button', { name: 'Save card' }))
+
+    await waitFor(() => expect(cards.saveCard).toHaveBeenCalled())
+    expect(vi.mocked(cards.saveCard).mock.calls[0]?.[1]).toMatchObject({ expiresOn: '2030-01-31' })
+    expect(await screen.findByText('Valid until 31 Jan 2030')).toBeInTheDocument()
+  })
+})

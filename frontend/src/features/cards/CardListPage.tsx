@@ -70,13 +70,14 @@ export function CardListPage() {
 }
 
 function Wallet({ cards }: { readonly cards: readonly CardDto[] }) {
-  const { favorites, recent, others } = organizeCards(cards)
+  const { expiring, favorites, recent, others } = organizeCards(cards)
   return (
     <>
+      <CardGroup title="Expiring soon" cards={expiring} />
       <CardGroup title="Favourites" cards={favorites} />
       <CardGroup title="Recently used" cards={recent} />
       <CardGroup
-        title={favorites.length + recent.length > 0 ? 'All other cards' : 'All cards'}
+        title={expiring.length + favorites.length + recent.length > 0 ? 'All other cards' : 'All cards'}
         cards={others}
       />
     </>

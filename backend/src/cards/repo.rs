@@ -22,6 +22,7 @@ const CARD_SELECT: &str = "
            (SELECT i.id FROM card_images i WHERE i.card_id = c.id AND i.kind = 'back') AS back_image_id,
            c.brand_id,
            (SELECT b.name FROM brands b WHERE b.id = c.brand_id) AS brand_name,
+           c.expires_on,
            c.created_at, c.updated_at
     FROM cards c
     LEFT JOIN card_user_prefs p ON p.card_id = c.id AND p.user_id = ?1";
@@ -95,8 +96,9 @@ pub async fn insert_card(
 ) -> sqlx::Result<()> {
     sqlx::query(
         "INSERT INTO cards (id, owner_id, store_name, card_number, barcode_format,
-                            member_name, color, notes, brand_id, created_at, updated_at, change_seq)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                            member_name, color, notes, brand_id, expires_on,
+                            created_at, updated_at, change_seq)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(id)
     .bind(owner_id)
@@ -107,6 +109,7 @@ pub async fn insert_card(
     .bind(&fields.color)
     .bind(&fields.notes)
     .bind(fields.brand_id)
+    .bind(&fields.expires_on)
     .bind(now)
     .bind(now)
     .bind(seq)
@@ -124,7 +127,7 @@ pub async fn update_card(
 ) -> sqlx::Result<()> {
     sqlx::query(
         "UPDATE cards SET store_name = ?, card_number = ?, barcode_format = ?,
-                          member_name = ?, color = ?, notes = ?, brand_id = ?,
+                          member_name = ?, color = ?, notes = ?, brand_id = ?, expires_on = ?,
                           updated_at = ?, change_seq = ?
          WHERE id = ?",
     )
@@ -135,6 +138,7 @@ pub async fn update_card(
     .bind(&fields.color)
     .bind(&fields.notes)
     .bind(fields.brand_id)
+    .bind(&fields.expires_on)
     .bind(now)
     .bind(seq)
     .bind(id)
@@ -187,7 +191,7 @@ pub async fn tombstone_card(
         "UPDATE cards SET deleted_at = ?, updated_at = ?, change_seq = ?,
                           store_name = '-', card_number = '-', barcode_format = 'none',
                           member_name = NULL, color = NULL, notes = NULL, household_id = NULL,
-                          brand_id = NULL
+                          brand_id = NULL, expires_on = NULL
          WHERE id = ?",
     )
     .bind(now)

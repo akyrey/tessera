@@ -47,6 +47,7 @@ export const card = (overrides: Partial<CardDto> = {}): CardDto => ({
   backImageId: null,
   brandId: null,
   brandName: null,
+  expiresOn: null,
   places: [],
   createdAt: 1_800_000_000,
   updatedAt: 1_800_000_000,

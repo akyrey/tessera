@@ -107,6 +107,7 @@ export const cardSchema = z.object({
   backImageId: z.string().nullable(),
   brandId: z.string().nullable(),
   brandName: z.string().nullable(),
+  expiresOn: z.string().nullable(),
   places: z.array(placeSchema),
   createdAt: z.number(),
   updatedAt: z.number(),

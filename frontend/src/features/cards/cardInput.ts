@@ -12,5 +12,6 @@ export function toInput(card: LocalCard): CardInput {
     notes: card.notes ?? undefined,
     brandId: card.brandId ?? undefined,
     places: card.places,
+    expiresOn: card.expiresOn ?? undefined,
   }
 }

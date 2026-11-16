@@ -49,6 +49,7 @@ function CardForm({ id, existing }: CardFormProps) {
   const [memberName, setMemberName] = useState(existing?.memberName ?? '')
   const [color, setColor] = useState<string | null>(existing?.color ?? null)
   const [notes, setNotes] = useState(existing?.notes ?? '')
+  const [expiresOn, setExpiresOn] = useState(existing?.expiresOn ?? '')
   const [brand, setBrand] = useState<BrandChoice | null>(
     existing?.brandId ? { id: existing.brandId, name: existing.brandName ?? 'Linked brand' } : null,
   )
@@ -75,6 +76,7 @@ function CardForm({ id, existing }: CardFormProps) {
       color: color ?? undefined,
       notes: notes.trim() || undefined,
       brandId: brand?.id,
+      expiresOn: expiresOn || undefined,
       // Hand-marked shops are managed from the card view and kept as they are.
       places: existing?.places ?? [],
     }
@@ -161,6 +163,17 @@ function CardForm({ id, existing }: CardFormProps) {
         </Field>
         <BrandPicker value={brand} onChange={setBrand} />
         <ColorPicker value={color} onChange={setColor} />
+        <Field label="Expires on (optional)">
+          {(props) => (
+            <input
+              {...props}
+              type="date"
+              className={INPUT_CLASS}
+              value={expiresOn}
+              onChange={(e) => setExpiresOn(e.target.value)}
+            />
+          )}
+        </Field>
         <Field label="Notes (optional)">
           {(props) => (
             <textarea

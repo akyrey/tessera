@@ -367,7 +367,45 @@ pub fn validate(input: CardInput) -> Result<CardFields, ApiError> {
         notes: optional_multiline("notes", input.notes, MAX_NOTES_CHARS)?,
         brand_id: input.brand_id,
         places: validate_places(input.places.unwrap_or_default())?,
+        expires_on: input
+            .expires_on
+            .as_deref()
+            .map(str::trim)
+            .filter(|date| !date.is_empty())
+            .map(validate_date)
+            .transpose()?,
     })
+}
+
+/// A real calendar date as `YYYY-MM-DD` (years 2000–2199 are plenty for coupons).
+fn validate_date(raw: &str) -> Result<String, ApiError> {
+    let invalid = || ApiError::Validation("expiry date must be a real date like 2027-03-31".into());
+    let parts: Vec<&str> = raw.split('-').collect();
+    let [year, month, day] = parts.as_slice() else {
+        return Err(invalid());
+    };
+    if year.len() != 4 || month.len() != 2 || day.len() != 2 {
+        return Err(invalid());
+    }
+    let (Ok(year), Ok(month), Ok(day)) = (
+        year.parse::<u32>(),
+        month.parse::<u32>(),
+        day.parse::<u32>(),
+    ) else {
+        return Err(invalid());
+    };
+    let leap = (year % 4 == 0 && year % 100 != 0) || year % 400 == 0;
+    let days_in_month = match month {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 if leap => 29,
+        2 => 28,
+        _ => return Err(invalid()),
+    };
+    if !(2000..2200).contains(&year) || day == 0 || day > days_in_month {
+        return Err(invalid());
+    }
+    Ok(raw.to_owned())
 }
 
 fn validate_places(places: Vec<Place>) -> Result<Vec<Place>, ApiError> {
@@ -470,6 +508,7 @@ mod tests {
             color: Some("#AABBCC".into()),
             notes: Some(" line 1\nline 2 ".into()),
             brand_id: None,
+            expires_on: Some(" 2028-02-29 ".into()),
             places: Some(vec![Place {
                 label: " Via Roma ".into(),
                 lat: 45.46,
@@ -487,6 +526,28 @@ mod tests {
         assert_eq!(fields.color.as_deref(), Some("#aabbcc"));
         assert_eq!(fields.notes.as_deref(), Some("line 1\nline 2"));
         assert_eq!(fields.places[0].label, "Via Roma");
+        assert_eq!(fields.expires_on.as_deref(), Some("2028-02-29"));
+    }
+
+    #[test]
+    fn expiry_dates_must_exist() {
+        for valid in ["2027-01-31", "2028-02-29", "2000-02-29", "2199-12-31"] {
+            assert_eq!(validate_date(valid).unwrap(), valid);
+        }
+        for invalid in [
+            "2027-02-29",
+            "2100-02-29",
+            "2027-04-31",
+            "2027-13-01",
+            "2027-00-10",
+            "27-01-01",
+            "2027/01/01",
+            "2027-1-1",
+            "1999-12-31",
+            "abcd-ef-gh",
+        ] {
+            assert!(validate_date(invalid).is_err(), "{invalid}");
+        }
     }
 
     #[test]

@@ -45,6 +45,7 @@ pub struct CardFields {
     pub notes: Option<String>,
     pub brand_id: Option<Uuid>,
     pub places: Vec<Place>,
+    pub expires_on: Option<String>,
 }
 
 // ---------- DTOs ----------
@@ -70,6 +71,9 @@ pub struct CardInput {
     /// Shops marked by hand; replaces the stored list.
     #[ts(optional)]
     pub places: Option<Vec<Place>>,
+    /// Last valid day (`YYYY-MM-DD`), for coupons and vouchers.
+    #[ts(optional)]
+    pub expires_on: Option<String>,
 }
 
 /// Body of `PUT /api/cards/{id}/sharing`.
@@ -114,6 +118,7 @@ pub struct CardDto {
     pub back_image_id: Option<Uuid>,
     pub brand_id: Option<Uuid>,
     pub brand_name: Option<String>,
+    pub expires_on: Option<String>,
     /// Filled after the row is read (separate table).
     #[sqlx(skip)]
     pub places: Vec<Place>,

@@ -32,8 +32,24 @@ describe('organizeCards', () => {
     expect(ids(result.others)).toEqual(['c1'])
   })
 
+  it('lifts coupons expiring soon above everything else', () => {
+    const today = new Date(2027, 2, 10)
+    const cards = [
+      named('later', 'Later', { expiresOn: '2027-03-15' }),
+      named('first', 'First', { expiresOn: '2027-03-11', isFavorite: true }),
+      named('far', 'Far', { expiresOn: '2027-12-31' }),
+      named('gone', 'Gone', { expiresOn: '2027-03-01' }),
+    ]
+
+    const result = organizeCards(cards, today)
+
+    expect(ids(result.expiring)).toEqual(['first', 'later'])
+    expect(ids(result.favorites)).toEqual([])
+    expect(ids(result.others)).toEqual(['far', 'gone'])
+  })
+
   it('handles an empty wallet', () => {
-    expect(organizeCards([])).toEqual({ favorites: [], recent: [], others: [] })
+    expect(organizeCards([])).toEqual({ expiring: [], favorites: [], recent: [], others: [] })
   })
 })
 

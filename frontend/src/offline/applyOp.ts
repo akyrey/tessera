@@ -39,6 +39,7 @@ function fieldsOf(input: CardInput, brandName: string | null | undefined) {
     brandId: input.brandId ?? null,
     brandName: input.brandId ? (brandName ?? null) : null,
     places: input.places ?? [],
+    expiresOn: input.expiresOn ?? null,
     storeName: input.storeName,
     cardNumber: input.cardNumber,
     barcodeFormat: input.barcodeFormat,
