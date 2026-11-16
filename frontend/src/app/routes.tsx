@@ -5,6 +5,7 @@ import { RequireAuth } from '../features/auth/RequireAuth'
 import { EditCardPage, NewCardPage } from '../features/cards/CardFormPage'
 import { CardListPage } from '../features/cards/CardListPage'
 import { CardViewPage } from '../features/cards/CardViewPage'
+import { MapPage } from '../features/map/MapPage'
 import { SettingsPage } from '../features/settings/SettingsPage'
 
 export const routes: RouteObject[] = [
@@ -17,6 +18,7 @@ export const routes: RouteObject[] = [
       { path: 'cards/new', element: <NewCardPage /> },
       { path: 'cards/:id', element: <CardViewPage /> },
       { path: 'cards/:id/edit', element: <EditCardPage /> },
+      { path: 'map', element: <MapPage /> },
       { path: 'settings', element: <SettingsPage /> },
     ],
   },

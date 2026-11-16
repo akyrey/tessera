@@ -25,12 +25,17 @@ export function CardListPage() {
           <p className="truncate text-sm text-brand-900/60">{me?.household.name}</p>
           <h1 className="text-2xl font-semibold">Cards</h1>
         </div>
-        <Link
-          to="/settings"
-          className={`${LINK_BUTTON} text-brand-700 ring-1 ring-brand-900/15 hover:bg-white`}
-        >
-          Settings
-        </Link>
+        <nav className="flex gap-2">
+          <Link to="/map" className={`${LINK_BUTTON} text-brand-700 ring-1 ring-brand-900/15 hover:bg-white`}>
+            Map
+          </Link>
+          <Link
+            to="/settings"
+            className={`${LINK_BUTTON} text-brand-700 ring-1 ring-brand-900/15 hover:bg-white`}
+          >
+            Settings
+          </Link>
+        </nav>
       </header>
 
       <SyncBanner />

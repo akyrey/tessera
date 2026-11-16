@@ -166,3 +166,38 @@ test.describe('nearby', () => {
     await expect(nearby.getByRole('link', { name: /Coop/ })).toHaveCount(0)
   })
 })
+
+test('the map loads OpenStreetMap tiles under the CSP, sending only our origin', async ({
+  page,
+  baseURL,
+}) => {
+  const errors = collectConsoleErrors(page)
+  await stubApi(page)
+  const referrers: (string | undefined)[] = []
+  // Never hit the real tile servers from tests: answer with a 1×1 PNG.
+  await page.route('https://tile.openstreetmap.org/**', (route) => {
+    referrers.push(route.request().headers()['referer'])
+    return route.fulfill({
+      contentType: 'image/png',
+      body: Buffer.from(
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
+        'base64',
+      ),
+    })
+  })
+  await page.route('**/api/changes*', (route) =>
+    json(route, {
+      cursor: 1,
+      cards: [{ ...card('c-ean', 'Esselunga', 'ean13', '4006381333931'), brandId: 'b-esse' }],
+    }),
+  )
+
+  await page.goto('/map')
+
+  await expect(page.getByLabel('Map of shops')).toBeVisible()
+  await expect(page.locator('.leaflet-tile-loaded').first()).toBeVisible()
+  await expect(page.getByText('OpenStreetMap', { exact: true })).toBeVisible()
+  expect(referrers.length).toBeGreaterThan(0)
+  for (const referrer of referrers) expect(referrer).toBe(`${new URL(baseURL ?? '').origin}/`)
+  expect(errors).toEqual([])
+})

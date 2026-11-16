@@ -83,6 +83,8 @@ export default defineConfig({
         'src/main.tsx',
         'src/App.tsx',
         'src/pwa.ts',
+        // Leaflet needs a real layout engine: covered by Playwright (e2e/cards.spec.ts).
+        'src/features/map/ShopMap.tsx',
       ],
       thresholds: {
         lines: COVERAGE_THRESHOLD,

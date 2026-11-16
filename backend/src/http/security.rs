@@ -4,11 +4,12 @@ use axum::http::{HeaderName, HeaderValue, header};
 use axum::response::Response;
 
 /// `wasm-unsafe-eval` is needed by the zxing-wasm barcode scanner; `blob:` by
-/// camera frames and generated barcode images.
+/// camera frames and generated barcode images. OpenStreetMap tiles (map view)
+/// are the only third-party resource, and only as images.
 pub const CONTENT_SECURITY_POLICY: &str = "default-src 'self'; \
 script-src 'self' 'wasm-unsafe-eval'; \
 style-src 'self'; \
-img-src 'self' data: blob:; \
+img-src 'self' data: blob: https://tile.openstreetmap.org; \
 connect-src 'self'; \
 worker-src 'self' blob:; \
 manifest-src 'self'; \
@@ -46,4 +47,29 @@ pub async fn apply_headers(mut response: Response) -> Response {
             .or_insert_with(|| HeaderValue::from_static(value));
     }
     response
+}
+
+#[cfg(test)]
+mod tests {
+    use super::CONTENT_SECURITY_POLICY;
+
+    fn directive(name: &str) -> &'static str {
+        CONTENT_SECURITY_POLICY
+            .split(';')
+            .map(str::trim)
+            .find(|d| d.starts_with(name))
+            .unwrap_or_default()
+    }
+
+    #[test]
+    fn only_map_tiles_come_from_a_third_party() {
+        assert_eq!(
+            directive("img-src"),
+            "img-src 'self' data: blob: https://tile.openstreetmap.org"
+        );
+        for name in ["default-src", "script-src", "style-src", "connect-src"] {
+            assert!(!directive(name).contains("https:"), "{name}");
+        }
+        assert_eq!(directive("connect-src"), "connect-src 'self'");
+    }
 }
