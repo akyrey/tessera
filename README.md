@@ -23,3 +23,7 @@ Other admin tasks: `cargo run -- admin --help` (in the cluster: `kubectl exec â€
 
 Rust DTOs annotated with `#[ts(export)]` generate TypeScript into `frontend/src/api/generated/` when the backend tests run (`make gen-types`).
 Those files are committed, and CI fails if they drift.
+
+## License
+
+[MIT](LICENSE)
