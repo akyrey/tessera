@@ -29,8 +29,9 @@ export default defineConfig({
       TESSERA_LISTEN_ADDR: `127.0.0.1:${PORT}`,
       TESSERA_DATABASE_URL: 'sqlite://.e2e/e2e.db',
       TESSERA_BOOTSTRAP_TOKEN: E2E_BOOTSTRAP_TOKEN,
-      // Never reach the real Wikidata/Overpass from tests: nothing listens on port 9.
+      // Never reach the real Wikidata/Commons/Overpass from tests: nothing listens on port 9.
       TESSERA_WIKIDATA_URL: 'http://127.0.0.1:9/w/api.php',
+      TESSERA_COMMONS_URL: 'http://127.0.0.1:9/commons/api.php',
       TESSERA_OVERPASS_URL: 'http://127.0.0.1:9/api/interpreter',
     },
   },

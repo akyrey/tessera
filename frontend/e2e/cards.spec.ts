@@ -31,6 +31,7 @@ const card = (id: string, storeName: string, barcodeFormat: string, cardNumber: 
   backImageId: null,
   brandId: null as string | null,
   brandName: null as string | null,
+  brandLogoId: null as string | null,
   expiresOn: null as string | null,
   places: [] as { label: string; lat: number; lon: number }[],
   createdAt: 1_800_000_000,
